@@ -1,0 +1,112 @@
+<view class="page">
+  <view class="gradient-header">
+    <view class="gh-logo">📷</view>
+    <view class="gh-title">照片翻译</view>
+    <view class="gh-sub">上传一张毛孩子的照片 · 生成专属海报文案</view>
+  </view>
+
+  <view class="section">
+    <!-- Upload card -->
+    <view class="card upload-card">
+      <view class="card-title">📤 上传照片</view>
+
+      <block wx:if="{{!previewPath && !fileName}}">
+        <view class="upload-box" bindtap="chooseFromAlbum">
+          <view class="upload-icon">＋</view>
+          <view class="upload-tip">点击从相册或拍照</view>
+          <view class="upload-sub">或下方按钮从聊天文件中选择</view>
+        </view>
+      </block>
+
+      <block wx:else>
+        <view class="preview-wrap">
+          <image
+            wx:if="{{previewPath}}"
+            class="preview-img"
+            src="{{previewPath}}"
+            mode="aspectFill"
+            bindtap="previewLocal"
+          />
+          <view wx:else class="preview-placeholder">
+            <view class="ph-icon">🖼️</view>
+            <view>HEIC/HEIF 文件</view>
+            <view class="muted">小程序无法本地预览，将由后端解析</view>
+          </view>
+          <view class="preview-name">{{fileName}}</view>
+          <view class="preview-actions">
+            <view class="chip" bindtap="chooseFromAlbum">📷 重选</view>
+            <view class="chip" bindtap="chooseFromFile">📂 选文件</view>
+            <view class="chip danger" bindtap="clearFile">✕ 删除</view>
+          </view>
+        </view>
+      </block>
+
+      <view wx:if="{{!previewPath && !fileName}}" class="dual-btn">
+        <view class="btn ghost half" bindtap="chooseFromAlbum">📷 相册/拍照</view>
+        <view class="btn ghost half" bindtap="chooseFromFile">📂 聊天文件</view>
+      </view>
+
+      <view class="format-tags">
+        <view class="format-label">支持格式</view>
+        <view class="format-list">
+          <view class="format-tag">JPG</view>
+          <view class="format-tag">PNG</view>
+          <view class="format-tag">WEBP</view>
+          <view class="format-tag">HEIC</view>
+          <view class="format-tag">BMP</view>
+          <view class="format-tag">GIF</view>
+        </view>
+      </view>
+
+      <view wx:if="{{errorMsg}}" class="error">{{errorMsg}}</view>
+
+      <button
+        class="btn big-btn"
+        bindtap="startTranslate"
+        loading="{{loading}}"
+        disabled="{{loading || !fileName}}"
+      >
+        ✨ 开始翻译
+      </button>
+    </view>
+
+    <!-- Result card -->
+    <block wx:if="{{quote || vibeLabel || persona}}">
+      <view class="card result-card">
+        <view class="card-title">💬 AI 文案</view>
+        <view class="quote-cn">{{quote}}</view>
+        <view wx:if="{{vibe}}" class="quote-en">"{{vibe}}"</view>
+        <view class="result-tags">
+          <view wx:if="{{vibeLabel}}" class="tag">🎨 {{vibeLabel}}</view>
+          <view wx:if="{{persona}}" class="tag outline">👤 {{persona}}</view>
+          <view wx:for="{{pets}}" wx:key="*this" class="tag outline">🐾 {{item}}</view>
+        </view>
+      </view>
+    </block>
+
+    <!-- Palette card -->
+    <view wx:if="{{palette.length}}" class="card">
+      <view class="card-title">🎨 色卡</view>
+      <view class="palette">
+        <view
+          wx:for="{{palette}}"
+          wx:key="*this"
+          class="swatch"
+          style="background:{{item}}"
+        >
+          <view class="swatch-hex">{{item}}</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- Poster -->
+    <view wx:if="{{posterImageSrc}}" class="card poster-card">
+      <view class="card-title">🖼️ 海报预览</view>
+      <view class="poster-frame" bindtap="previewPoster">
+        <image class="poster-img" src="{{posterImageSrc}}" mode="widthFix" />
+      </view>
+      <button class="btn big-btn" bindtap="savePoster">💾 下载高清海报</button>
+      <view class="muted poster-tip">点击图片可全屏预览 · 长按可分享</view>
+    </view>
+  </view>
+</view>

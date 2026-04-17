@@ -1,0 +1,42 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/photo/photo",
+    "pages/cat/cat",
+    "pages/dog/dog"
+  ],
+  "window": {
+    "backgroundTextStyle": "light",
+    "backgroundColor": "#FFFAF5",
+    "navigationBarBackgroundColor": "#FF6B6B",
+    "navigationBarTitleText": "PetWhisperer",
+    "navigationBarTextStyle": "white"
+  },
+  "tabBar": {
+    "color": "#8B8580",
+    "selectedColor": "#FF6B6B",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/photo/photo",
+        "text": "照片"
+      },
+      {
+        "pagePath": "pages/cat/cat",
+        "text": "猫语"
+      },
+      {
+        "pagePath": "pages/dog/dog",
+        "text": "狗语"
+      }
+    ]
+  },
+  "permission": {
+    "scope.record": {
+      "desc": "需要录音权限以录制宠物叫声"
+    }
+  },
+  "sitemapLocation": "sitemap.json",
+  "style": "v2"
+}

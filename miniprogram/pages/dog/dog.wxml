@@ -1,0 +1,237 @@
+﻿<view class="page voice-page">
+  <view class="gradient-header">
+    <view class="gh-logo">{{petEmoji}}</view>
+    <view class="gh-title">{{petName}}语翻译</view>
+    <view class="gh-sub">读懂{{petLang}}言{{petLang}}语 · 也能开口对它说话</view>
+  </view>
+
+  <view class="section">
+    <view class="segment large top-segment">
+      <view
+        class="segment-item {{topMode === 'to_human' ? 'active' : ''}}"
+        data-value="to_human"
+        bindtap="setTopMode"
+      >{{petEmoji}}声 → 人话</view>
+      <view
+        class="segment-item {{topMode === 'to_pet' ? 'active' : ''}}"
+        data-value="to_pet"
+        bindtap="setTopMode"
+      >人话 → {{petName}}语</view>
+    </view>
+
+    <view class="card settings-card">
+      <view class="col-2">
+        <view>
+          <view class="label">回复语言</view>
+          <picker mode="selector" range="{{langList}}" range-key="label" value="{{langIndex}}" bindchange="setLang">
+            <view class="field">
+              <text>{{langList[langIndex].label}}</text>
+              <text class="arrow">▾</text>
+            </view>
+          </picker>
+        </view>
+        <view>
+          <view class="label">声音</view>
+          <picker mode="selector" range="{{voiceList}}" range-key="label" value="{{voiceIndex}}" bindchange="setVoice">
+            <view class="field">
+              <text>{{voiceList[voiceIndex].label}}</text>
+              <text class="arrow">▾</text>
+            </view>
+          </picker>
+        </view>
+      </view>
+    </view>
+
+    <block wx:if="{{topMode === 'to_human'}}">
+      <view class="card">
+        <view class="segment sub-segment">
+          <view class="segment-item {{toHumanSubMode === 'record' ? 'active' : ''}}" data-value="record" bindtap="setToHumanSubMode">🎙️ 按住录音</view>
+          <view class="segment-item {{toHumanSubMode === 'upload' ? 'active' : ''}}" data-value="upload" bindtap="setToHumanSubMode">📁 上传音频</view>
+        </view>
+
+        <block wx:if="{{toHumanSubMode === 'record'}}">
+          <view class="record-zone">
+            <view
+              class="record-btn {{recording ? 'recording' : ''}}"
+              bindtouchstart="onRecordStart"
+              bindtouchend="onRecordEnd"
+              bindtouchcancel="onRecordEnd"
+            >
+              <view wx:if="{{recording}}" class="ripple"></view>
+              <view wx:if="{{recording}}" class="ripple ripple-2"></view>
+              <view class="record-inner">
+                <view class="record-icon">{{recording ? '●' : '🎙️'}}</view>
+                <view class="record-text">{{recording ? '松开发送' : '按住说话'}}</view>
+              </view>
+            </view>
+            <view wx:if="{{recording}}" class="record-timer">
+              <view class="dot"></view>
+              录音中 {{recordingDuration}}s
+            </view>
+            <view wx:else class="record-tip">最长 60 秒 · 录完自动翻译</view>
+          </view>
+        </block>
+
+        <block wx:elif="{{toHumanSubMode === 'upload'}}">
+          <view class="upload-row" bindtap="chooseExistingAudio">
+            <view class="upload-row-icon">📂</view>
+            <view class="upload-row-body">
+              <view class="upload-row-title">选择音频文件</view>
+              <view class="upload-row-sub">支持 mp3 / wav / m4a / aac / ogg</view>
+            </view>
+            <view class="upload-row-arrow">›</view>
+          </view>
+          <view wx:if="{{audioFileName}}" class="audio-file-name">已选：{{audioFileName}}</view>
+        </block>
+      </view>
+    </block>
+
+    <block wx:if="{{topMode === 'to_pet'}}">
+      <view class="card">
+        <view class="segment sub-segment">
+          <view class="segment-item {{toPetSubMode === 'guide' ? 'active' : ''}}" data-value="guide" bindtap="setToPetSubMode">🎓 训练指南</view>
+          <view class="segment-item {{toPetSubMode === 'fun' ? 'active' : ''}}" data-value="fun" bindtap="setToPetSubMode">🎉 娱乐翻译</view>
+        </view>
+
+        <view class="label" style="margin-top:24rpx">想对{{petName}}说什么</view>
+        <textarea
+          class="text-input"
+          placeholder="{{toPetSubMode === 'guide' ? '例如：让它别上桌 / 学会握手' : '例如：今天好乖呀 / 我爱你'}}"
+          value="{{text}}"
+          bindinput="onTextInput"
+          maxlength="200"
+          auto-height
+        ></textarea>
+
+        <button
+          class="btn big-btn"
+          bindtap="sendText"
+          loading="{{loading}}"
+          disabled="{{loading || !text}}"
+        >{{toPetSubMode === 'guide' ? '🎓 生成训练指南' : '🎉 翻译为' + petName + '语'}}</button>
+      </view>
+    </block>
+
+    <view wx:if="{{errorMsg}}" class="error">{{errorMsg}}</view>
+
+    <view wx:if="{{loading && !result}}" class="card skeleton">
+      <view class="sk-line w70"></view>
+      <view class="sk-line w90"></view>
+      <view class="sk-line w50"></view>
+    </view>
+
+    <block wx:if="{{result && topMode === 'to_human'}}">
+      <view class="card">
+        <view wx:if="{{result.recognized}}">
+          <view class="label">{{petName}}声识别</view>
+          <view class="bubble bubble-pet">
+            <view class="bubble-tag">{{petEmoji}}</view>
+            <view>{{result.recognized}}</view>
+          </view>
+        </view>
+        <view style="height:24rpx"></view>
+        <view class="label">人类听得懂的版本</view>
+        <view class="bubble bubble-human">
+          <view class="bubble-tag">💬</view>
+          <view>{{result.translation}}</view>
+        </view>
+      </view>
+
+      <view wx:if="{{hasTts}}" class="card player-card">
+        <view class="card-title">🔊 朗读</view>
+        <view class="player">
+          <view class="player-btn" bindtap="togglePlay">
+            <text>{{player.playing ? '❚❚' : '▶'}}</text>
+          </view>
+          <view class="player-mid">
+            <slider
+              class="player-slider"
+              min="0" max="100" step="1"
+              value="{{player.progress}}"
+              activeColor="#FF8C42"
+              backgroundColor="#FFEFE3"
+              block-size="20"
+              block-color="#FF8C42"
+              bindchange="seekProgress"
+            />
+            <view class="player-time">{{player.currentTimeStr}} / {{player.durationStr}}</view>
+          </view>
+        </view>
+      </view>
+    </block>
+
+    <block wx:if="{{result && topMode === 'to_pet' && toPetSubMode === 'guide'}}">
+      <view wx:if="{{guideSteps.length}}" class="card">
+        <view class="card-title">🎓 训练四步法</view>
+        <view class="step-list">
+          <view wx:for="{{guideSteps}}" wx:key="icon" class="step">
+            <view class="step-icon">{{item.icon}}</view>
+            <view class="step-body">
+              <view class="step-head">{{item.head}}</view>
+              <view class="step-text">{{item.body}}</view>
+            </view>
+          </view>
+        </view>
+      </view>
+      <view wx:elif="{{result.translation}}" class="card">
+        <view class="card-title">🎓 训练指南</view>
+        <view class="guide-raw">{{result.translation}}</view>
+      </view>
+
+      <view wx:if="{{hasTts}}" class="card player-card">
+        <view class="card-title">🔊 朗读指南</view>
+        <view class="player">
+          <view class="player-btn" bindtap="togglePlay">
+            <text>{{player.playing ? '❚❚' : '▶'}}</text>
+          </view>
+          <view class="player-mid">
+            <slider
+              class="player-slider"
+              min="0" max="100" step="1"
+              value="{{player.progress}}"
+              activeColor="#FF8C42"
+              backgroundColor="#FFEFE3"
+              block-size="20"
+              block-color="#FF8C42"
+              bindchange="seekProgress"
+            />
+            <view class="player-time">{{player.currentTimeStr}} / {{player.durationStr}}</view>
+          </view>
+        </view>
+      </view>
+    </block>
+
+    <block wx:if="{{result && topMode === 'to_pet' && toPetSubMode === 'fun'}}">
+      <view class="card">
+        <view class="label">{{petName}}语翻译</view>
+        <view class="bubble bubble-pet">
+          <view class="bubble-tag">{{petEmoji}}</view>
+          <view>{{result.translation}}</view>
+        </view>
+      </view>
+
+      <view wx:if="{{hasAnimal || hasTts}}" class="card player-card">
+        <view class="card-title">🔊 听一听</view>
+        <view class="player">
+          <view class="player-btn" bindtap="togglePlay">
+            <text>{{player.playing ? '❚❚' : '▶'}}</text>
+          </view>
+          <view class="player-mid">
+            <slider
+              class="player-slider"
+              min="0" max="100" step="1"
+              value="{{player.progress}}"
+              activeColor="#FF8C42"
+              backgroundColor="#FFEFE3"
+              block-size="20"
+              block-color="#FF8C42"
+              bindchange="seekProgress"
+            />
+            <view class="player-time">{{player.currentTimeStr}} / {{player.durationStr}}</view>
+          </view>
+        </view>
+      </view>
+    </block>
+
+  </view>
+</view>

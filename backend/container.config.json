@@ -1,0 +1,20 @@
+{
+  "$schema": "https://framework-1258016615.tcloudbaseapp.com/schema/latest.json",
+  "containerPort": 8080,
+  "dockerfilePath": "./Dockerfile",
+  "buildDir": ".",
+  "minNum": 0,
+  "maxNum": 5,
+  "cpu": 0.5,
+  "mem": 1,
+  "policyType": "cpu",
+  "policyThreshold": 60,
+  "envParams": {
+    "PORT": "8080",
+    "PYTHONUNBUFFERED": "1"
+  },
+  "customLogs": "stdout",
+  "initialDelaySeconds": 10,
+  "createTime": "",
+  "updateTime": ""
+}
