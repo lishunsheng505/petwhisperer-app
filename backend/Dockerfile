@@ -19,11 +19,19 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# pip 用清华源加速（云托管在境内构建）
+# pip 镜像：优先腾讯云内网（云托管在腾讯云上，秒级），失败则回退到阿里云、官方
 COPY requirements.txt .
-RUN pip install --no-cache-dir \
-        -i https://pypi.tuna.tsinghua.edu.cn/simple \
-        -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && (pip install --no-cache-dir \
+            -i https://mirrors.cloud.tencent.com/pypi/simple \
+            --trusted-host mirrors.cloud.tencent.com \
+            -r requirements.txt \
+        || pip install --no-cache-dir \
+            -i https://mirrors.aliyun.com/pypi/simple \
+            --trusted-host mirrors.aliyun.com \
+            -r requirements.txt \
+        || pip install --no-cache-dir \
+            -r requirements.txt)
 
 COPY . .
 
