@@ -1,3 +1,5 @@
 {
-  "navigationBarTitleText": "照片翻译"
+  "navigationBarTitleText": "照片翻译",
+  "enableShareAppMessage": true,
+  "enableShareTimeline": true
 }

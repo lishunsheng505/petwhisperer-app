@@ -1,5 +1,7 @@
 <view class="page">
+  <privacy-popup />
   <view class="gradient-header">
+    <view class="gh-about" hover-class="gh-about-hover" bindtap="goAbout">关于</view>
     <view class="gh-logo">🐾</view>
     <view class="gh-title">PetWhisperer</view>
     <view class="gh-sub">读懂毛孩子的每一句话</view>
@@ -7,7 +9,9 @@
 
   <view class="cards">
     <view class="entry photo" hover-class="entry-hover" bindtap="goPhoto">
-      <view class="entry-icon">📷</view>
+      <view class="entry-icon">
+        <image class="entry-icon-img" src="/images/pet.png" mode="aspectFit" />
+      </view>
       <view class="entry-body">
         <view class="entry-title">照片翻译</view>
         <view class="entry-sub">上传照片 · 生成专属海报文案</view>
@@ -16,7 +20,9 @@
     </view>
 
     <view class="entry cat" hover-class="entry-hover" bindtap="goCat">
-      <view class="entry-icon">🐱</view>
+      <view class="entry-icon">
+        <image class="entry-icon-img" src="/images/cat.png" mode="aspectFit" />
+      </view>
       <view class="entry-body">
         <view class="entry-title">猫语翻译</view>
         <view class="entry-sub">录音翻译 · 文字翻译 · 训练指南</view>
@@ -25,7 +31,9 @@
     </view>
 
     <view class="entry dog" hover-class="entry-hover" bindtap="goDog">
-      <view class="entry-icon">🐶</view>
+      <view class="entry-icon">
+        <image class="entry-icon-img" src="/images/dog.png" mode="aspectFit" />
+      </view>
       <view class="entry-body">
         <view class="entry-title">狗语翻译</view>
         <view class="entry-sub">录音翻译 · 文字翻译 · 训练指南</view>
@@ -34,7 +42,4 @@
     </view>
   </view>
 
-  <view class="footer-tip">
-    <text>底部 Tab 切换三大功能</text>
-  </view>
 </view>

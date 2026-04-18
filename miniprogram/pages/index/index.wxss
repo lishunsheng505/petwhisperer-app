@@ -1,3 +1,21 @@
+.gh-about {
+  position: absolute;
+  top: 28rpx;
+  right: 32rpx;
+  z-index: 2;
+  padding: 10rpx 22rpx;
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  font-size: 24rpx;
+  border-radius: 999rpx;
+  border: 2rpx solid rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(8rpx);
+}
+
+.gh-about-hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
 .cards {
   padding: 40rpx 32rpx 0;
   margin-top: -40rpx;
@@ -5,11 +23,11 @@
 
 .entry {
   background: var(--card);
-  border: 2rpx solid var(--border);
-  border-radius: 24rpx;
+  border: 2rpx solid #FFE7DA;
+  border-radius: 36rpx;
   padding: 32rpx;
-  margin-bottom: 24rpx;
-  box-shadow: 0 8rpx 24rpx rgba(255, 107, 107, 0.08);
+  margin-bottom: 28rpx;
+  box-shadow: 0 12rpx 32rpx rgba(255, 140, 90, 0.10);
   display: flex;
   align-items: center;
   gap: 24rpx;
@@ -34,22 +52,40 @@
 }
 
 .entry-icon {
-  width: 96rpx;
-  height: 96rpx;
-  border-radius: 24rpx;
-  background: linear-gradient(135deg, #FFE3D6 0%, #FFD2BE 100%);
+  width: 150rpx;
+  height: 150rpx;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 56rpx;
+  flex-shrink: 0;
+  background: linear-gradient(160deg, #FFE8D5 0%, #FFC9A8 100%);
+  border: 5rpx solid #FFFFFF;
+  box-shadow:
+    0 8rpx 18rpx rgba(255, 140, 90, 0.22),
+    0 0 0 3rpx #FFD9BD;
+  overflow: hidden;
+}
+
+.entry-icon-img {
+  width: 94%;
+  height: 94%;
+  display: block;
+  background: transparent;
 }
 
 .entry.cat .entry-icon {
-  background: linear-gradient(135deg, #FFEAEA 0%, #FFD0D0 100%);
+  background: linear-gradient(160deg, #FFE0EC 0%, #FFB8D2 100%);
+  box-shadow:
+    0 8rpx 18rpx rgba(255, 130, 170, 0.24),
+    0 0 0 3rpx #FFC9DC;
 }
 
 .entry.dog .entry-icon {
-  background: linear-gradient(135deg, #FFF1DC 0%, #FFE2BB 100%);
+  background: linear-gradient(160deg, #FFEAC9 0%, #FFC68A 100%);
+  box-shadow:
+    0 8rpx 18rpx rgba(255, 165, 80, 0.24),
+    0 0 0 3rpx #FFD7A8;
 }
 
 .entry-body {
@@ -75,9 +111,3 @@
   line-height: 1;
 }
 
-.footer-tip {
-  text-align: center;
-  font-size: 22rpx;
-  color: var(--muted);
-  margin-top: 60rpx;
-}

@@ -1,0 +1,127 @@
+.about-hero {
+  background: linear-gradient(135deg, #FF6B6B 0%, #FF8C42 100%);
+  color: #fff;
+  text-align: center;
+  padding: 80rpx 40rpx 90rpx;
+  border-radius: 0 0 48rpx 48rpx;
+  position: relative;
+  overflow: hidden;
+}
+
+.about-hero::after {
+  content: "";
+  position: absolute;
+  width: 320rpx;
+  height: 320rpx;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  right: -100rpx;
+  top: -100rpx;
+}
+
+.about-logo {
+  width: 180rpx;
+  height: 180rpx;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.95);
+  border: 6rpx solid rgba(255, 255, 255, 0.7);
+  margin: 0 auto 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 12rpx 32rpx rgba(0, 0, 0, 0.18);
+  position: relative;
+  z-index: 1;
+}
+
+.about-logo-img {
+  width: 92%;
+  height: 92%;
+}
+
+.about-name {
+  font-size: 44rpx;
+  font-weight: 700;
+  letter-spacing: 1rpx;
+}
+
+.about-slogan {
+  font-size: 26rpx;
+  opacity: 0.9;
+  margin-top: 8rpx;
+}
+
+.about-version {
+  display: inline-block;
+  margin-top: 18rpx;
+  padding: 6rpx 18rpx;
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 999rpx;
+  font-size: 22rpx;
+}
+
+.about-text {
+  font-size: 28rpx;
+  line-height: 1.7;
+  color: #2b2b2b;
+  margin-bottom: 12rpx;
+}
+
+.about-text.muted {
+  color: var(--muted);
+}
+
+.about-text.small {
+  font-size: 24rpx;
+}
+
+.about-text .hl {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.about-link {
+  font-size: 26rpx;
+  color: var(--primary);
+  font-weight: 600;
+  margin-top: 12rpx;
+}
+
+.about-row {
+  display: flex;
+  align-items: center;
+  padding: 18rpx 0;
+  border-bottom: 2rpx dashed #FFE7DA;
+}
+
+.about-row:last-child {
+  border-bottom: none;
+}
+
+.about-row-k {
+  width: 100rpx;
+  color: var(--muted);
+  font-size: 26rpx;
+}
+
+.about-row-v {
+  flex: 1;
+  font-size: 28rpx;
+  word-break: break-all;
+  color: #2b2b2b;
+}
+
+.about-row-arrow {
+  font-size: 22rpx;
+  color: var(--primary);
+  padding: 6rpx 16rpx;
+  border: 2rpx solid var(--primary);
+  border-radius: 999rpx;
+}
+
+.about-footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 22rpx;
+  margin: 40rpx 0 20rpx;
+}

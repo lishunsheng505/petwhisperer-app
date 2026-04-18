@@ -1,0 +1,60 @@
+<view class="page about-page">
+  <view class="about-hero">
+    <view class="about-logo">
+      <image class="about-logo-img" src="/images/pet.png" mode="aspectFit" />
+    </view>
+    <view class="about-name">PetWhisperer</view>
+    <view class="about-slogan">读懂毛孩子的每一句话</view>
+    <view class="about-version">v{{version}}</view>
+  </view>
+
+  <view class="section">
+    <view class="card">
+      <view class="card-title">📖 这是什么</view>
+      <view class="about-text">
+        PetWhisperer 是一款基于 AI 的趣味宠物翻译小程序：
+        把宠物的叫声 / 照片 / 想对宠物说的话翻译成轻松好玩的中文，
+        也能给出训练动作的「四步指南」。
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">⚠️ 免责声明</view>
+      <view class="about-text">
+        本应用所有翻译内容均由 AI 生成，<text class="hl">仅供娱乐</text>，
+        不代表宠物真实想法，也不构成任何医学、行为学或训练专业建议。
+        如发现宠物异常，请咨询执业兽医。
+      </view>
+      <view class="about-text">
+        请勿上传他人受版权保护的图片或音频；上传内容仅用于本次翻译，不会保存。
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">🔐 隐私</view>
+      <view class="about-text">
+        我们仅在你主动操作时收集照片 / 录音 / 文本用于翻译，
+        翻译完成后即删除，不做其他用途。
+      </view>
+      <view class="about-link" bindtap="openPrivacy">查看《用户隐私保护指引》›</view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">📮 反馈</view>
+      <view
+        class="about-row"
+        data-value="petwhisperer@example.com"
+        bindtap="copyContact"
+      >
+        <view class="about-row-k">邮箱</view>
+        <view class="about-row-v">petwhisperer@example.com</view>
+        <view class="about-row-arrow">复制</view>
+      </view>
+      <view class="about-text muted small">
+        建议、bug、想要的新功能，都欢迎告诉我们。
+      </view>
+    </view>
+
+    <view class="about-footer">Made with ❤️ for fluffy friends</view>
+  </view>
+</view>

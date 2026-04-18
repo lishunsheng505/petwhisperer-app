@@ -1,4 +1,6 @@
-const { photoTranslateChunked, pingHealth } = require("../../utils/api.js");
+const { photoTranslateChunked } = require("../../utils/api.js");
+const history = require("../../utils/history.js");
+const { toFriendly, withRetry } = require("../../utils/errors.js");
 
 const ALLOWED_EXT = ["jpg", "jpeg", "png", "webp", "heic", "heif", "bmp", "gif"];
 const PREVIEWABLE = ["jpg", "jpeg", "png", "webp", "bmp", "gif"];
@@ -74,6 +76,76 @@ Page({
     palette: [],
     pets: [],
     posterImageSrc: "",
+
+    historyOpen: false,
+    historyList: [],
+  },
+
+  onShow() {
+    this.setData({ historyList: this._buildHistory() });
+  },
+
+  _buildHistory() {
+    const items = history.list("photo") || [];
+    return items.map((it) => Object.assign({}, it, { _t: history.fmtTime(it.time) }));
+  },
+
+  openHistory() {
+    this.setData({ historyOpen: true, historyList: this._buildHistory() });
+  },
+  closeHistory() {
+    this.setData({ historyOpen: false });
+  },
+  clearHistory() {
+    wx.showModal({
+      title: "清空历史？",
+      content: "本地保存的照片翻译记录将全部删除（不可恢复）",
+      confirmColor: "#FF6B6B",
+      success: (r) => {
+        if (r.confirm) {
+          history.clear("photo");
+          this.setData({ historyList: [] });
+        }
+      },
+    });
+  },
+  reopenHistoryItem(e) {
+    const idx = e.currentTarget.dataset.idx;
+    const it = (this.data.historyList || [])[idx];
+    if (!it) return;
+    this.setData({
+      historyOpen: false,
+      quote: it.quote || "",
+      persona: it.persona || "",
+      vibe: it.vibe || "",
+      vibeLabel: it.vibeLabel || "",
+      palette: it.palette || [],
+      pets: it.pets || [],
+      previewPath: it.previewPath || "",
+      fileName: it.fileName || "（历史记录）",
+      posterImageSrc: it.posterImageSrc || "",
+      errorMsg: "",
+    });
+  },
+
+  onShareAppMessage() {
+    const txt = (this.data.quote || "").trim();
+    return {
+      title: txt
+        ? "AI 替我家毛孩子代言：" + txt.slice(0, 24)
+        : "PetWhisperer · 给你的毛孩子写一句海报文案",
+      path: "/pages/index/index",
+      imageUrl: this.data.posterImageSrc || "/images/pet.png",
+    };
+  },
+  onShareTimeline() {
+    return {
+      title: this.data.quote
+        ? "AI 给我家毛孩子写的海报文案"
+        : "PetWhisperer · 萌宠海报生成器",
+      query: "",
+      imageUrl: this.data.posterImageSrc || "/images/pet.png",
+    };
   },
 
   chooseFromAlbum() {
@@ -160,6 +232,12 @@ Page({
       this.setData({ errorMsg: "请先选择图片" });
       return;
     }
+    const net = await _getNetType();
+    if (net === "none") {
+      this.setData({ errorMsg: "网络似乎断开了，请检查 Wi-Fi 或数据连接" });
+      return;
+    }
+
     this.setData({
       loading: true,
       errorMsg: "",
@@ -173,18 +251,27 @@ Page({
     });
     this._posterBase64 = "";
     wx.showLoading({ title: "上传中 0%", mask: true });
+
+    let coldHintTimer = setTimeout(() => {
+      wx.showLoading({ title: "服务器正在唤醒…", mask: true });
+    }, 8000);
+
     try {
       const ext = (this.data.fileName || "").split(".").pop().toLowerCase();
       const finalPath = await ensureUnderLimit(path, ext);
       const finalSize = await _statSize(finalPath);
       console.log("[upload size]", finalSize, "bytes");
-      const r = await photoTranslateChunked(finalPath, ({ done, total }) => {
-        const pct = Math.floor((done / total) * 100);
-        wx.showLoading({
-          title: pct < 100 ? `上传中 ${pct}%` : "AI 分析中…",
-          mask: true,
-        });
-      });
+      const r = await withRetry(() =>
+        photoTranslateChunked(finalPath, ({ done, total }) => {
+          const pct = Math.floor((done / total) * 100);
+          wx.showLoading({
+            title: pct < 100 ? `上传中 ${pct}%` : "AI 分析中…",
+            mask: true,
+          });
+        })
+      );
+      clearTimeout(coldHintTimer);
+
       const a = (r && r.analysis) || {};
       const posterB64 = (r && r.poster_image_base64) || "";
       this._posterBase64 = posterB64;
@@ -205,7 +292,7 @@ Page({
       }
 
       wx.hideLoading();
-      this.setData({
+      const next = {
         loading: false,
         quote: a.quote_cn || "",
         persona: a.persona || "",
@@ -214,16 +301,27 @@ Page({
         palette: a.palette || [],
         pets: a.pets || [],
         posterImageSrc: posterPath,
+      };
+      this.setData(next);
+
+      history.add("photo", {
+        quote: next.quote,
+        persona: next.persona,
+        vibe: next.vibe,
+        vibeLabel: next.vibeLabel,
+        palette: next.palette,
+        pets: next.pets,
+        previewPath: this.data.previewPath,
+        fileName: this.data.fileName,
+        posterImageSrc: next.posterImageSrc,
       });
+      this.setData({ historyList: this._buildHistory() });
     } catch (e) {
+      clearTimeout(coldHintTimer);
       wx.hideLoading();
       this.setData({
         loading: false,
-        errorMsg:
-          "翻译失败：" +
-          (typeof e === "string"
-            ? e
-            : e.errMsg || e.message || JSON.stringify(e)),
+        errorMsg: "翻译失败：" + toFriendly(e, "photo/translate"),
       });
     }
   },
@@ -263,26 +361,14 @@ Page({
     wx.previewImage({ urls: [this.data.posterImageSrc] });
   },
 
-  async testHealth() {
-    this.setData({ healthMsg: "测试中…", errorMsg: "" });
-    try {
-      const r = await pingHealth();
-      this.setData({
-        healthMsg: "✅ 连接成功：" + JSON.stringify(r),
-      });
-    } catch (e) {
-      const detail =
-        typeof e === "string"
-          ? e
-          : JSON.stringify({
-              errMsg: e && e.errMsg,
-              errCode: e && e.errCode,
-              errno: e && e.errno,
-            });
-      this.setData({
-        healthMsg: "",
-        errorMsg: "❌ /health 调用失败：" + detail,
-      });
-    }
-  },
+  noop() {},
 });
+
+function _getNetType() {
+  return new Promise((resolve) => {
+    wx.getNetworkType({
+      success: (r) => resolve(r.networkType || "unknown"),
+      fail: () => resolve("unknown"),
+    });
+  });
+}

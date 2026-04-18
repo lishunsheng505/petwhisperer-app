@@ -1,6 +1,9 @@
 <view class="page">
+  <privacy-popup />
   <view class="gradient-header">
-    <view class="gh-logo">📷</view>
+    <view class="gh-logo-wrap">
+      <image class="gh-logo-img" src="/images/pet.png" mode="aspectFit" />
+    </view>
     <view class="gh-title">照片翻译</view>
     <view class="gh-sub">上传一张毛孩子的照片 · 生成专属海报文案</view>
   </view>
@@ -11,6 +14,9 @@
       <view class="card-title">📤 上传照片</view>
 
       <block wx:if="{{!previewPath && !fileName}}">
+        <view class="cartoon-avatar wide">
+          <image class="cartoon-avatar-img" src="/images/pet.png" mode="aspectFit" />
+        </view>
         <view class="upload-box" bindtap="chooseFromAlbum">
           <view class="upload-icon">＋</view>
           <view class="upload-tip">点击从相册或拍照</view>
@@ -59,7 +65,6 @@
       </view>
 
       <view wx:if="{{errorMsg}}" class="error">{{errorMsg}}</view>
-      <view wx:if="{{healthMsg}}" class="error" style="color:#0a8;">{{healthMsg}}</view>
 
       <button
         class="btn big-btn"
@@ -68,14 +73,6 @@
         disabled="{{loading || !fileName}}"
       >
         ✨ 开始翻译
-      </button>
-
-      <button
-        class="btn ghost"
-        style="margin-top:16rpx;"
-        bindtap="testHealth"
-      >
-        🩺 测试连接 (调 /health)
       </button>
     </view>
 
@@ -89,6 +86,9 @@
           <view wx:if="{{vibeLabel}}" class="tag">🎨 {{vibeLabel}}</view>
           <view wx:if="{{persona}}" class="tag outline">👤 {{persona}}</view>
           <view wx:for="{{pets}}" wx:key="*this" class="tag outline">🐾 {{item}}</view>
+        </view>
+        <view class="disclaimer-block">
+          <view class="disclaimer">⚠️ 仅供娱乐，请勿当真</view>
         </view>
       </view>
     </block>
@@ -112,10 +112,63 @@
     <view wx:if="{{posterImageSrc}}" class="card poster-card">
       <view class="card-title">🖼️ 海报预览</view>
       <view class="poster-frame" bindtap="previewPoster">
-        <image class="poster-img" src="{{posterImageSrc}}" mode="widthFix" />
+        <image
+          class="poster-img"
+          src="{{posterImageSrc}}"
+          mode="widthFix"
+          show-menu-by-longpress="{{true}}"
+        />
       </view>
-      <button class="btn big-btn" bindtap="savePoster">💾 下载高清海报</button>
-      <view class="muted poster-tip">点击图片可全屏预览 · 长按可分享</view>
+      <view class="dual-btn">
+        <button class="btn big-btn half" bindtap="savePoster">💾 保存海报</button>
+        <button class="btn big-btn half outline" open-type="share">↗ 分享好友</button>
+      </view>
+      <view class="poster-tip-wrap">
+        <view class="poster-tip-pill">👆 点击全屏 · ✋ 长按图片可保存/识别二维码</view>
+      </view>
+    </view>
+
+    <!-- 历史按钮 -->
+    <view class="history-fab" hover-class="hf-hover" bindtap="openHistory">
+      <view class="hf-icon">🕘</view>
+      <view class="hf-text">最近</view>
+    </view>
+  </view>
+
+  <!-- 历史抽屉 -->
+  <view wx:if="{{historyOpen}}" class="hist-mask" catchtap="closeHistory">
+    <view class="hist-sheet" catchtap="noop">
+      <view class="hist-head">
+        <view class="hist-title">最近翻译</view>
+        <view class="hist-clear" bindtap="clearHistory">清空</view>
+      </view>
+      <view wx:if="{{!historyList.length}}" class="hist-empty">
+        还没有记录哦，先翻译一张照片吧～
+      </view>
+      <scroll-view scroll-y class="hist-list" wx:else>
+        <view
+          wx:for="{{historyList}}"
+          wx:key="time"
+          class="hist-item"
+          data-idx="{{index}}"
+          bindtap="reopenHistoryItem"
+        >
+          <image
+            wx:if="{{item.previewPath}}"
+            class="hist-thumb"
+            src="{{item.previewPath}}"
+            mode="aspectFill"
+          />
+          <view wx:else class="hist-thumb hist-thumb-fallback">🖼️</view>
+          <view class="hist-body">
+            <view class="hist-quote">{{item.quote || '（无文案）'}}</view>
+            <view class="hist-meta">
+              <text wx:if="{{item.vibeLabel}}" class="hist-tag">{{item.vibeLabel}}</text>
+              <text class="hist-time">{{item._t}}</text>
+            </view>
+          </view>
+        </view>
+      </scroll-view>
     </view>
   </view>
 </view>

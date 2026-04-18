@@ -1,3 +1,5 @@
 {
-  "navigationBarTitleText": "猫语翻译"
+  "navigationBarTitleText": "猫语翻译",
+  "enableShareAppMessage": true,
+  "enableShareTimeline": true
 }

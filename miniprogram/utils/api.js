@@ -117,7 +117,7 @@ async function photoTranslateChunked(filePath, onProgress) {
   }
   const fullB64 = await _readFileBase64(filePath);
   const filename = _basename(filePath) || "upload.jpg";
-  const CHUNK = 150 * 1024;
+  const CHUNK = 50 * 1024;
   const total = Math.max(1, Math.ceil(fullB64.length / CHUNK));
   const sessionId = `s_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
@@ -220,11 +220,62 @@ async function voiceTranslate(pet, opts) {
   });
 }
 
+/**
+ * 分片版语音翻译 —— 绕开 callContainer 1MB 请求体限制。
+ * pet: "cat" | "dog"
+ * opts: { mode, lang, voiceGender, text, audioPath }
+ * onProgress({ done, total }) 可选。
+ *
+ * 没有 audioPath（纯文本翻译）时直接走老的单次 voiceTranslate，
+ * 因为请求体本来就很小不会触发 -606001。
+ */
+async function voiceTranslateChunked(pet, opts, onProgress) {
+  const { mode, lang, voiceGender, text, audioPath } = opts || {};
+  if (!USE_CLOUD || !audioPath) {
+    return voiceTranslate(pet, opts);
+  }
+
+  const fullB64 = await _readFileBase64(audioPath);
+  const filename = _basename(audioPath) || "audio.aac";
+  const CHUNK = 50 * 1024;
+  const total = Math.max(1, Math.ceil(fullB64.length / CHUNK));
+  const sessionId = `v_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+  let lastResult = null;
+  for (let i = 0; i < total; i++) {
+    const slice = fullB64.slice(i * CHUNK, (i + 1) * CHUNK);
+    const isLast = i === total - 1;
+    const r = await _callContainer("/voice/chunk", {
+      data: {
+        session_id: sessionId,
+        chunk_index: i,
+        total_chunks: total,
+        chunk_b64: slice,
+        filename,
+        is_last: isLast,
+        pet,
+        mode,
+        lang: lang || "zh",
+        voice_gender: voiceGender || "female",
+        text: text || "",
+      },
+    });
+    if (typeof onProgress === "function") {
+      try {
+        onProgress({ done: i + 1, total });
+      } catch (e) {}
+    }
+    if (isLast) lastResult = r;
+  }
+  return lastResult;
+}
+
 module.exports = {
   API_BASE,
   USE_CLOUD,
   photoTranslate,
   photoTranslateChunked,
   voiceTranslate,
+  voiceTranslateChunked,
   pingHealth,
 };

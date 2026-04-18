@@ -1,6 +1,9 @@
-<view class="page voice-page">
+﻿<view class="page voice-page">
+  <privacy-popup />
   <view class="gradient-header">
-    <view class="gh-logo">{{petEmoji}}</view>
+    <view class="gh-logo-wrap">
+      <image class="gh-logo-img" src="/images/cat.png" mode="aspectFit" />
+    </view>
     <view class="gh-title">{{petName}}语翻译</view>
     <view class="gh-sub">读懂{{petLang}}言{{petLang}}语 · 也能开口对它说话</view>
   </view>
@@ -11,7 +14,7 @@
         class="segment-item {{topMode === 'to_human' ? 'active' : ''}}"
         data-value="to_human"
         bindtap="setTopMode"
-      >{{petEmoji}}声 → 人话</view>
+      >{{petLang}}声 → 人话</view>
       <view
         class="segment-item {{topMode === 'to_pet' ? 'active' : ''}}"
         data-value="to_pet"
@@ -51,6 +54,10 @@
 
         <block wx:if="{{toHumanSubMode === 'record'}}">
           <view class="record-zone">
+            <view class="cartoon-avatar cat">
+              <image class="cartoon-avatar-img" src="/images/cat.png" mode="aspectFit" />
+            </view>
+            <view class="cartoon-arrow">↓</view>
             <view
               class="record-btn {{recording ? 'recording' : ''}}"
               bindtouchstart="onRecordStart"
@@ -61,7 +68,7 @@
               <view wx:if="{{recording}}" class="ripple ripple-2"></view>
               <view class="record-inner">
                 <view class="record-icon">{{recording ? '●' : '🎙️'}}</view>
-                <view class="record-text">{{recording ? '松开发送' : '按住说话'}}</view>
+                <view class="record-text">{{recording ? '松开发送' : '长按说话'}}</view>
               </view>
             </view>
             <view wx:if="{{recording}}" class="record-timer">
@@ -69,6 +76,9 @@
               录音中 {{recordingDuration}}s
             </view>
             <view wx:else class="record-tip">最长 60 秒 · 录完自动翻译</view>
+            <view class="disclaimer-block">
+              <view class="disclaimer">⚠️ 仅供娱乐，请勿当真</view>
+            </view>
           </view>
         </block>
 
@@ -93,6 +103,9 @@
           <view class="segment-item {{toPetSubMode === 'fun' ? 'active' : ''}}" data-value="fun" bindtap="setToPetSubMode">🎉 娱乐翻译</view>
         </view>
 
+        <view class="cartoon-avatar cat" style="width:160rpx;height:160rpx;margin-top:8rpx">
+          <image class="cartoon-avatar-img" src="/images/cat.png" mode="aspectFit" />
+        </view>
         <view class="label" style="margin-top:24rpx">想对{{petName}}说什么</view>
         <textarea
           class="text-input"
@@ -135,6 +148,9 @@
           <view class="bubble-tag">💬</view>
           <view>{{result.translation}}</view>
         </view>
+        <view class="disclaimer-block">
+          <view class="disclaimer">⚠️ 仅供娱乐，请勿当真</view>
+        </view>
       </view>
 
       <view wx:if="{{hasTts}}" class="card player-card">
@@ -176,6 +192,9 @@
       <view wx:elif="{{result.translation}}" class="card">
         <view class="card-title">🎓 训练指南</view>
         <view class="guide-raw">{{result.translation}}</view>
+        <view class="disclaimer-block">
+          <view class="disclaimer">⚠️ 仅供娱乐，请勿当真</view>
+        </view>
       </view>
 
       <view wx:if="{{hasTts}}" class="card player-card">
@@ -208,6 +227,9 @@
           <view class="bubble-tag">{{petEmoji}}</view>
           <view>{{result.translation}}</view>
         </view>
+        <view class="disclaimer-block">
+          <view class="disclaimer">⚠️ 仅供娱乐，请勿当真</view>
+        </view>
       </view>
 
       <view wx:if="{{hasAnimal || hasTts}}" class="card player-card">
@@ -233,5 +255,39 @@
       </view>
     </block>
 
+    <view class="history-fab" hover-class="hf-hover" bindtap="openHistory">
+      <view class="hf-icon">🕘</view>
+      <view class="hf-text">最近</view>
+    </view>
+  </view>
+
+  <view wx:if="{{historyOpen}}" class="hist-mask" catchtap="closeHistory">
+    <view class="hist-sheet" catchtap="noop">
+      <view class="hist-head">
+        <view class="hist-title">最近翻译</view>
+        <view class="hist-clear" bindtap="clearHistory">清空</view>
+      </view>
+      <view wx:if="{{!historyList.length}}" class="hist-empty">
+        还没有记录哦，先翻译一句{{petLang}}声吧～
+      </view>
+      <scroll-view scroll-y class="hist-list" wx:else>
+        <view
+          wx:for="{{historyList}}"
+          wx:key="time"
+          class="hist-item"
+          data-idx="{{index}}"
+          bindtap="reopenHistoryItem"
+        >
+          <view class="hist-thumb hist-thumb-fallback">{{petEmoji}}</view>
+          <view class="hist-body">
+            <view class="hist-quote">{{item.text || (item.result && item.result.translation) || '（翻译记录）'}}</view>
+            <view class="hist-meta">
+              <text class="hist-tag">{{item.topMode === 'to_human' ? petLang+'→人话' : '人话→'+petName+'语'}}</text>
+              <text class="hist-time">{{item._t}}</text>
+            </view>
+          </view>
+        </view>
+      </scroll-view>
+    </view>
   </view>
 </view>

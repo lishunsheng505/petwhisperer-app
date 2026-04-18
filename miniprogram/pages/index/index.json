@@ -1,5 +1,7 @@
 {
   "navigationBarTitleText": "PetWhisperer · 首页",
   "navigationBarBackgroundColor": "#FF6B6B",
-  "navigationBarTextStyle": "white"
+  "navigationBarTextStyle": "white",
+  "enableShareAppMessage": true,
+  "enableShareTimeline": true
 }

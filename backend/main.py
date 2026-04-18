@@ -301,6 +301,133 @@ async def photo_chunk(request: Request) -> JSONResponse:
 
 
 # ============================================================
+# /voice/chunk —— 音频分片上传，绕开 callContainer 1MB 请求体限制
+# ============================================================
+
+@app.post("/voice/chunk")
+async def voice_chunk(request: Request) -> JSONResponse:
+    """音频分片上传：
+      入参 JSON: {
+        session_id: str,
+        chunk_index: int,        # 从 0 开始
+        total_chunks: int,
+        chunk_b64: str,          # 这一片的 base64
+        filename: str,           # 音频文件名（带扩展名）
+        is_last: bool,
+        # 业务字段（每片都带也行，最后一片必须带）:
+        pet: "cat" | "dog",
+        mode: "pet_to_human" | "human_to_pet_fun" | "human_to_pet_guide",
+        lang: str,
+        voice_gender: str,
+        text: str | None
+      }
+      非最后一片：返回 {received, total, done:false}
+      最后一片 + 收齐：返回与 /cat /dog 完全相同的翻译结果
+    """
+    _gc_sessions()
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"无法解析 JSON: {e}") from e
+
+    session_id = (body.get("session_id") or "").strip()
+    if not session_id:
+        raise HTTPException(status_code=400, detail="缺少 session_id")
+    try:
+        chunk_index = int(body.get("chunk_index", -1))
+        total_chunks = int(body.get("total_chunks", 0))
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"chunk_index/total_chunks 非整数: {e}") from e
+    if chunk_index < 0 or total_chunks <= 0 or chunk_index >= total_chunks:
+        raise HTTPException(status_code=400, detail="chunk_index/total_chunks 无效")
+
+    chunk_b64 = body.get("chunk_b64") or ""
+    if not chunk_b64:
+        raise HTTPException(status_code=400, detail="chunk_b64 为空")
+    try:
+        chunk_bytes = base64.b64decode(chunk_b64)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"chunk base64 解码失败: {e}") from e
+
+    filename = (body.get("filename") or "audio.aac").strip() or "audio.aac"
+    is_last = bool(body.get("is_last"))
+
+    sess_key = f"voice:{session_id}"
+    sess = _UPLOAD_SESSIONS.get(sess_key)
+    if sess is None:
+        sess = {
+            "chunks": {},
+            "filename": filename,
+            "total": total_chunks,
+            "t0": time.time(),
+        }
+        _UPLOAD_SESSIONS[sess_key] = sess
+
+    sess["chunks"][chunk_index] = chunk_bytes
+    sess["filename"] = filename
+    sess["total"] = total_chunks
+
+    received = len(sess["chunks"])
+
+    if not is_last or received < total_chunks:
+        return JSONResponse({
+            "ok": True,
+            "received": received,
+            "total": total_chunks,
+            "done": False,
+        })
+
+    try:
+        full = b"".join(sess["chunks"][i] for i in range(total_chunks))
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=f"分片缺失: index={e}") from e
+    finally:
+        _UPLOAD_SESSIONS.pop(sess_key, None)
+
+    if not full:
+        raise HTTPException(status_code=400, detail="组装后音频为空")
+
+    pet = (body.get("pet") or "").strip()
+    if pet not in ("cat", "dog"):
+        raise HTTPException(
+            status_code=400, detail=f"pet 必须是 cat 或 dog（实际 {pet!r}）"
+        )
+    mode = (body.get("mode") or "").strip()
+    allowed_modes = ("pet_to_human", "human_to_pet_fun", "human_to_pet_guide")
+    if mode not in allowed_modes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"mode 必须是 {allowed_modes} 之一（实际 {mode!r}）",
+        )
+    lang = (body.get("lang") or "zh").strip()
+    voice_gender = (body.get("voice_gender") or "female").strip()
+    text = body.get("text")
+    if isinstance(text, str):
+        text = text.strip() or None
+    else:
+        text = None
+
+    voice_id = resolve_voice(lang, voice_gender)
+    try:
+        result = run_voice_job(
+            pet=pet,
+            mode=mode,
+            lang_code=lang,
+            voice_id=voice_id,
+            text=text,
+            audio_bytes=full,
+            audio_filename=filename,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("voice_chunk job failed pet=%s", pet)
+        msg = traceback.format_exc() if os.getenv("DEBUG") == "1" else str(e)
+        raise HTTPException(status_code=500, detail=msg) from e
+    return JSONResponse(_voice_json_from_result(result))
+
+
+# ============================================================
 # /photo
 # ============================================================
 

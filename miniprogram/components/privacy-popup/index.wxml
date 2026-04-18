@@ -1,0 +1,20 @@
+<view wx:if="{{show}}" class="pp-mask" catchtap="noop">
+  <view class="pp-card">
+    <view class="pp-title">用户隐私保护指引</view>
+    <view class="pp-desc">
+      {{desc}}
+    </view>
+    <view class="pp-link" bindtap="openContract">{{urlText}}</view>
+    <view class="pp-actions">
+      <button class="pp-btn pp-btn-no" bindtap="onDisagree">不同意</button>
+      <button
+        id="agree-btn"
+        class="pp-btn pp-btn-yes"
+        open-type="agreePrivacyAuthorization"
+        bindagreeprivacyauthorization="onAgree"
+      >
+        同意
+      </button>
+    </view>
+  </view>
+</view>

@@ -26,11 +26,15 @@
   width: 280rpx;
   height: 280rpx;
   border-radius: 50%;
-  background: var(--gradient);
+  background: linear-gradient(160deg, #FFB375 0%, #FF7A1F 100%);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 12rpx 32rpx rgba(255, 107, 107, 0.36);
+  box-shadow:
+    0 14rpx 36rpx rgba(255, 130, 40, 0.42),
+    inset 0 -16rpx 24rpx rgba(220, 100, 20, 0.25),
+    inset 0 12rpx 16rpx rgba(255, 255, 255, 0.4);
+  border: 6rpx solid #fff;
   position: relative;
   transition: transform 0.15s ease;
 }

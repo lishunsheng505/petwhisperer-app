@@ -1,6 +1,8 @@
-const { voiceTranslate } = require("./api.js");
+const { voiceTranslate, voiceTranslateChunked } = require("./api.js");
 const recorder = require("./recorder.js");
 const { createPlayer } = require("./player.js");
+const history = require("./history.js");
+const { toFriendly, withRetry } = require("./errors.js");
 
 const LANG_LIST = [
   { value: "zh", label: "中文" },
@@ -101,10 +103,81 @@ function createVoicePage(pet) {
         durationStr: "00:00",
         ready: false,
       },
+
+      historyOpen: false,
+      historyList: [],
     },
 
     onLoad() {
       this._player = createPlayer((s) => this.setData({ player: s }));
+      this.setData({ historyList: this._buildHistory() });
+    },
+
+    onShow() {
+      this.setData({ historyList: this._buildHistory() });
+    },
+
+    _buildHistory() {
+      const items = history.list(pet) || [];
+      return items.map((it) => Object.assign({}, it, { _t: history.fmtTime(it.time) }));
+    },
+
+    openHistory() {
+      this.setData({ historyOpen: true, historyList: this._buildHistory() });
+    },
+    closeHistory() {
+      this.setData({ historyOpen: false });
+    },
+    clearHistory() {
+      const self = this;
+      wx.showModal({
+        title: "清空历史？",
+        content: "本地保存的翻译记录将全部删除（不可恢复）",
+        confirmColor: "#FF6B6B",
+        success: (r) => {
+          if (r.confirm) {
+            history.clear(pet);
+            self.setData({ historyList: [] });
+          }
+        },
+      });
+    },
+    reopenHistoryItem(e) {
+      const idx = e.currentTarget.dataset.idx;
+      const it = (this.data.historyList || [])[idx];
+      if (!it) return;
+      this._player && this._player.stop();
+      this.setData({
+        historyOpen: false,
+        topMode: it.topMode || "to_human",
+        toHumanSubMode: it.toHumanSubMode || "record",
+        toPetSubMode: it.toPetSubMode || "guide",
+        text: it.text || "",
+        result: it.result || null,
+        guideSteps: it.guideSteps || [],
+        hasTts: false,
+        hasAnimal: false,
+        errorMsg: "",
+      });
+    },
+
+    onShareAppMessage() {
+      const r = this.data.result || {};
+      const tx = (r.translation || "").trim();
+      return {
+        title: tx
+          ? "AI 翻译我家" + this.data.petName + "说的话：" + tx.slice(0, 24)
+          : "PetWhisperer · " + this.data.petName + "语翻译",
+        path: "/pages/index/index",
+        imageUrl: isCat ? "/images/cat.png" : "/images/dog.png",
+      };
+    },
+    onShareTimeline() {
+      return {
+        title: "PetWhisperer · " + (isCat ? "猫" : "狗") + "语翻译",
+        query: "",
+        imageUrl: isCat ? "/images/cat.png" : "/images/dog.png",
+      };
     },
 
     onUnload() {
@@ -256,14 +329,38 @@ function createVoicePage(pet) {
         hasAnimal: false,
         guideSteps: [],
       });
-      wx.showLoading({ title: "翻译中…", mask: true });
-      try {
-        const r = await voiceTranslate(this.data.pet, {
-          mode: "pet_to_human",
-          lang: this.data.lang,
-          voiceGender: this.data.voiceGender,
-          audioPath,
+      const net = await _getNetType();
+      if (net === "none") {
+        this.setData({
+          loading: false,
+          errorMsg: "网络似乎断开了，请检查 Wi-Fi 或数据连接",
         });
+        return;
+      }
+      wx.showLoading({ title: "上传中 0%", mask: true });
+      let coldHintTimer = setTimeout(() => {
+        wx.showLoading({ title: "服务器正在唤醒…", mask: true });
+      }, 8000);
+      try {
+        const r = await withRetry(() =>
+          voiceTranslateChunked(
+            this.data.pet,
+            {
+              mode: "pet_to_human",
+              lang: this.data.lang,
+              voiceGender: this.data.voiceGender,
+              audioPath,
+            },
+            ({ done, total }) => {
+              const pct = Math.floor((done / total) * 100);
+              wx.showLoading({
+                title: pct < 100 ? `上传中 ${pct}%` : "AI 翻译中…",
+                mask: true,
+              });
+            }
+          )
+        );
+        clearTimeout(coldHintTimer);
         wx.hideLoading();
         const tts = r && r.tts_audio_base64;
         const animal = r && r.animal_audio_base64;
@@ -275,9 +372,20 @@ function createVoicePage(pet) {
           loading: false,
         });
         if (tts) this._player.loadBase64(tts, "mp3", true);
+
+        history.add(pet, {
+          topMode: "to_human",
+          toHumanSubMode: this.data.toHumanSubMode,
+          result: lite,
+        });
+        this.setData({ historyList: this._buildHistory() });
       } catch (e) {
+        clearTimeout(coldHintTimer);
         wx.hideLoading();
-        this.setData({ loading: false, errorMsg: "翻译失败：" + _errMsg(e) });
+        this.setData({
+          loading: false,
+          errorMsg: "翻译失败：" + toFriendly(e, pet + "/audio"),
+        });
       }
     },
 
@@ -301,14 +409,28 @@ function createVoicePage(pet) {
         hasAnimal: false,
         guideSteps: [],
       });
-      wx.showLoading({ title: "翻译中…", mask: true });
-      try {
-        const r = await voiceTranslate(this.data.pet, {
-          mode: apiMode,
-          lang: this.data.lang,
-          voiceGender: this.data.voiceGender,
-          text,
+      const net = await _getNetType();
+      if (net === "none") {
+        this.setData({
+          loading: false,
+          errorMsg: "网络似乎断开了，请检查 Wi-Fi 或数据连接",
         });
+        return;
+      }
+      wx.showLoading({ title: "翻译中…", mask: true });
+      let coldHintTimer = setTimeout(() => {
+        wx.showLoading({ title: "服务器正在唤醒…", mask: true });
+      }, 8000);
+      try {
+        const r = await withRetry(() =>
+          voiceTranslate(this.data.pet, {
+            mode: apiMode,
+            lang: this.data.lang,
+            voiceGender: this.data.voiceGender,
+            text,
+          })
+        );
+        clearTimeout(coldHintTimer);
         wx.hideLoading();
         const tts = r && r.tts_audio_base64;
         const animal = r && r.animal_audio_base64;
@@ -326,9 +448,22 @@ function createVoicePage(pet) {
         });
         const b = animal || tts;
         if (b) this._player.loadBase64(b, "mp3", true);
+
+        history.add(pet, {
+          topMode: "to_pet",
+          toPetSubMode: this.data.toPetSubMode,
+          text,
+          result: lite,
+          guideSteps,
+        });
+        this.setData({ historyList: this._buildHistory() });
       } catch (e) {
+        clearTimeout(coldHintTimer);
         wx.hideLoading();
-        this.setData({ loading: false, errorMsg: "翻译失败：" + _errMsg(e) });
+        this.setData({
+          loading: false,
+          errorMsg: "翻译失败：" + toFriendly(e, pet + "/text"),
+        });
       }
     },
 
@@ -340,7 +475,18 @@ function createVoicePage(pet) {
       const ratio = Number(e.detail.value) / 100;
       this._player && this._player.seekRatio(ratio);
     },
+
+    noop() {},
   };
+}
+
+function _getNetType() {
+  return new Promise((resolve) => {
+    wx.getNetworkType({
+      success: (r) => resolve(r.networkType || "unknown"),
+      fail: () => resolve("unknown"),
+    });
+  });
 }
 
 module.exports = { createVoicePage };
