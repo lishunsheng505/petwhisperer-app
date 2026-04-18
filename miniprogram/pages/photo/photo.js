@@ -1,4 +1,4 @@
-const { photoTranslate } = require("../../utils/api.js");
+const { photoTranslateChunked, pingHealth } = require("../../utils/api.js");
 
 const ALLOWED_EXT = ["jpg", "jpeg", "png", "webp", "heic", "heif", "bmp", "gif"];
 const PREVIEWABLE = ["jpg", "jpeg", "png", "webp", "bmp", "gif"];
@@ -14,6 +14,51 @@ function _basename(p) {
   const norm = p.replace(/\\/g, "/");
   const i = norm.lastIndexOf("/");
   return i < 0 ? norm : norm.slice(i + 1);
+}
+
+/** 分片上传后无需压缩，仅作"过大就先轻压一次"的安全网。 */
+const MAX_UPLOAD_BYTES = 6 * 1024 * 1024;
+const COMPRESSIBLE = ["jpg", "jpeg", "png"];
+
+function _statSize(p) {
+  return new Promise((resolve) => {
+    wx.getFileSystemManager().stat({
+      path: p,
+      success: (r) => resolve((r.stats && r.stats.size) || 0),
+      fail: () => resolve(0),
+    });
+  });
+}
+
+function _compressOnce(src, quality) {
+  return new Promise((resolve, reject) => {
+    wx.compressImage({
+      src,
+      quality,
+      success: (r) => resolve(r.tempFilePath),
+      fail: reject,
+    });
+  });
+}
+
+async function ensureUnderLimit(src, ext) {
+  const e = (ext || "").toLowerCase();
+  if (COMPRESSIBLE.indexOf(e) < 0) return src;
+  let cur = src;
+  let size = await _statSize(cur);
+  if (!size || size <= MAX_UPLOAD_BYTES) return cur;
+  for (const q of [80, 60, 40, 25, 15]) {
+    try {
+      const next = await _compressOnce(cur, q);
+      const ns = await _statSize(next);
+      cur = next;
+      size = ns || size;
+      if (size <= MAX_UPLOAD_BYTES) return cur;
+    } catch (e) {
+      break;
+    }
+  }
+  return cur;
 }
 
 Page({
@@ -36,7 +81,7 @@ Page({
       count: 1,
       mediaType: ["image"],
       sourceType: ["album", "camera"],
-      sizeType: ["original", "compressed"],
+      sizeType: ["compressed"],
       success: (res) => {
         const f = res.tempFiles && res.tempFiles[0];
         if (!f) return;
@@ -127,9 +172,19 @@ Page({
       posterImageSrc: "",
     });
     this._posterBase64 = "";
-    wx.showLoading({ title: "AI 分析中…", mask: true });
+    wx.showLoading({ title: "上传中 0%", mask: true });
     try {
-      const r = await photoTranslate(path);
+      const ext = (this.data.fileName || "").split(".").pop().toLowerCase();
+      const finalPath = await ensureUnderLimit(path, ext);
+      const finalSize = await _statSize(finalPath);
+      console.log("[upload size]", finalSize, "bytes");
+      const r = await photoTranslateChunked(finalPath, ({ done, total }) => {
+        const pct = Math.floor((done / total) * 100);
+        wx.showLoading({
+          title: pct < 100 ? `上传中 ${pct}%` : "AI 分析中…",
+          mask: true,
+        });
+      });
       const a = (r && r.analysis) || {};
       const posterB64 = (r && r.poster_image_base64) || "";
       this._posterBase64 = posterB64;
@@ -206,5 +261,28 @@ Page({
   previewPoster() {
     if (!this.data.posterImageSrc) return;
     wx.previewImage({ urls: [this.data.posterImageSrc] });
+  },
+
+  async testHealth() {
+    this.setData({ healthMsg: "测试中…", errorMsg: "" });
+    try {
+      const r = await pingHealth();
+      this.setData({
+        healthMsg: "✅ 连接成功：" + JSON.stringify(r),
+      });
+    } catch (e) {
+      const detail =
+        typeof e === "string"
+          ? e
+          : JSON.stringify({
+              errMsg: e && e.errMsg,
+              errCode: e && e.errCode,
+              errno: e && e.errno,
+            });
+      this.setData({
+        healthMsg: "",
+        errorMsg: "❌ /health 调用失败：" + detail,
+      });
+    }
   },
 });

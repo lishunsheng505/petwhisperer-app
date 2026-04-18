@@ -59,6 +59,7 @@
       </view>
 
       <view wx:if="{{errorMsg}}" class="error">{{errorMsg}}</view>
+      <view wx:if="{{healthMsg}}" class="error" style="color:#0a8;">{{healthMsg}}</view>
 
       <button
         class="btn big-btn"
@@ -67,6 +68,14 @@
         disabled="{{loading || !fileName}}"
       >
         ✨ 开始翻译
+      </button>
+
+      <button
+        class="btn ghost"
+        style="margin-top:16rpx;"
+        bindtap="testHealth"
+      >
+        🩺 测试连接 (调 /health)
       </button>
     </view>
 

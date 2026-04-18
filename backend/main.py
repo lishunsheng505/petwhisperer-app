@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import time
 import traceback
 from typing import Any
 
@@ -187,6 +188,116 @@ def root() -> HTMLResponse:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# ============================================================
+# /photo/chunk —— 分片上传，绕开 callContainer 1MB 请求体限制
+# ============================================================
+# 内存中暂存上传中的分片。云托管要把实例最小=最大=1，
+# 否则不同 chunk 命中不同实例会丢失。
+_UPLOAD_SESSIONS: dict[str, dict[str, Any]] = {}
+_UPLOAD_TTL = 300  # 5 分钟
+
+
+def _gc_sessions() -> None:
+    now = time.time()
+    expired = [k for k, v in _UPLOAD_SESSIONS.items() if now - v["t0"] > _UPLOAD_TTL]
+    for k in expired:
+        _UPLOAD_SESSIONS.pop(k, None)
+
+
+@app.post("/photo/chunk")
+async def photo_chunk(request: Request) -> JSONResponse:
+    """分片上传图片：
+      入参 JSON: {
+        session_id: str,         # 客户端生成，整次上传共用
+        chunk_index: int,        # 从 0 开始
+        total_chunks: int,
+        chunk_b64: str,          # 这一片的 base64
+        filename: str,           # 原文件名（带扩展名）
+        is_last: bool            # 是否最后一片
+      }
+      非最后一片：返回 {received, total}
+      最后一片 + 收齐：返回完整 AI 分析结果 + 海报 base64
+    """
+    _gc_sessions()
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"无法解析 JSON: {e}") from e
+
+    session_id = (body.get("session_id") or "").strip()
+    if not session_id:
+        raise HTTPException(status_code=400, detail="缺少 session_id")
+    try:
+        chunk_index = int(body.get("chunk_index", -1))
+        total_chunks = int(body.get("total_chunks", 0))
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"chunk_index/total_chunks 非整数: {e}") from e
+    if chunk_index < 0 or total_chunks <= 0 or chunk_index >= total_chunks:
+        raise HTTPException(status_code=400, detail="chunk_index/total_chunks 无效")
+
+    chunk_b64 = body.get("chunk_b64") or ""
+    if not chunk_b64:
+        raise HTTPException(status_code=400, detail="chunk_b64 为空")
+    try:
+        chunk_bytes = base64.b64decode(chunk_b64)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"chunk base64 解码失败: {e}") from e
+
+    filename = (body.get("filename") or "upload.jpg").strip() or "upload.jpg"
+    is_last = bool(body.get("is_last"))
+
+    sess = _UPLOAD_SESSIONS.get(session_id)
+    if sess is None:
+        sess = {
+            "chunks": {},
+            "filename": filename,
+            "total": total_chunks,
+            "t0": time.time(),
+        }
+        _UPLOAD_SESSIONS[session_id] = sess
+
+    sess["chunks"][chunk_index] = chunk_bytes
+    sess["filename"] = filename
+    sess["total"] = total_chunks
+
+    received = len(sess["chunks"])
+
+    if not is_last or received < total_chunks:
+        return JSONResponse({
+            "ok": True,
+            "received": received,
+            "total": total_chunks,
+            "done": False,
+        })
+
+    try:
+        full = b"".join(sess["chunks"][i] for i in range(total_chunks))
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=f"分片缺失: index={e}") from e
+    finally:
+        _UPLOAD_SESSIONS.pop(session_id, None)
+
+    if not full:
+        raise HTTPException(status_code=400, detail="组装后文件为空")
+
+    try:
+        analysis, poster_png = run_photo_job(full, filename)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("photo_chunk job failed")
+        raise HTTPException(status_code=500, detail=f"分析失败：{e}") from e
+
+    return JSONResponse({
+        "ok": True,
+        "done": True,
+        "analysis": analysis,
+        "poster_image_base64": base64.b64encode(poster_png).decode("ascii"),
+    })
 
 
 # ============================================================

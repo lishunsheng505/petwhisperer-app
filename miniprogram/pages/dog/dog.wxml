@@ -1,4 +1,4 @@
-﻿<view class="page voice-page">
+<view class="page voice-page">
   <view class="gradient-header">
     <view class="gh-logo">{{petEmoji}}</view>
     <view class="gh-title">{{petName}}语翻译</view>

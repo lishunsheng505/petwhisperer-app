@@ -13,10 +13,8 @@ const API_BASE = "http://127.0.0.1:8080";
 /** 是否使用微信云托管。生产环境建议 true。 */
 const USE_CLOUD = true;
 
-/** 云开发环境 ID（在 微信开发者工具 → 云开发 / 云托管 控制台 看到）。
- *  ⚠️ 部署完云托管后，把下面这串改成你自己的环境 ID，例如 "petwhisperer-prod-3gxxxxxxx"
- */
-const CLOUD_ENV = "your-cloud-env-id";
+/** 云开发 / 云托管 环境 ID。 */
+const CLOUD_ENV = "prod-d2gsvju9f35d6f154";
 
 /** 云托管中的服务名（创建服务时自己取的）。 */
 const CLOUD_SERVICE = "petwhisperer-api";

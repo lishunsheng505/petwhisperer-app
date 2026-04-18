@@ -32,16 +32,17 @@ function _readFileBase64(filePath) {
 }
 
 /** 调用云托管容器（HTTPS 自动 + 鉴权 + 不用配合法域名）。 */
-function _callContainer(path, { data, header } = {}) {
+function _callContainer(path, { data, header, method } = {}) {
   return new Promise((resolve, reject) => {
     if (!wx.cloud || !wx.cloud.callContainer) {
       reject(new Error("当前微信版本不支持 wx.cloud.callContainer"));
       return;
     }
-    wx.cloud.callContainer({
+    const m = (method || "POST").toUpperCase();
+    const cfg = {
       config: { env: CLOUD_ENV },
       path,
-      method: "POST",
+      method: m,
       header: Object.assign(
         {
           "X-WX-SERVICE": CLOUD_SERVICE,
@@ -49,9 +50,9 @@ function _callContainer(path, { data, header } = {}) {
         },
         header || {}
       ),
-      data: data || {},
       timeout: 60000,
       success(res) {
+        console.log("[callContainer ok]", path, res);
         if (res.statusCode >= 400) {
           const j = res.data || {};
           reject(j.detail || j.error || res.errMsg || "请求失败");
@@ -62,10 +63,18 @@ function _callContainer(path, { data, header } = {}) {
         resolve(body);
       },
       fail(err) {
+        console.error("[callContainer fail]", path, err);
         reject(err);
       },
-    });
+    };
+    if (m !== "GET") cfg.data = data || {};
+    wx.cloud.callContainer(cfg);
   });
+}
+
+/** 自检接口（GET /health），用来快速定位 -606001 是不是 env/service/AppID 问题 */
+function pingHealth() {
+  return _callContainer("/health", { method: "GET" });
 }
 
 // ========== /photo ==========
@@ -95,6 +104,45 @@ async function photoTranslate(filePath) {
       },
     });
   });
+}
+
+/**
+ * 分片版照片翻译 —— 绕开 callContainer 1MB 请求体限制。
+ * 每片 base64 长度 ~150KB（HTTP body 后约 200KB），任意大小图都能上传。
+ *   onProgress({ done, total }) 可选，给 UI 显示上传进度。
+ */
+async function photoTranslateChunked(filePath, onProgress) {
+  if (!USE_CLOUD) {
+    return photoTranslate(filePath);
+  }
+  const fullB64 = await _readFileBase64(filePath);
+  const filename = _basename(filePath) || "upload.jpg";
+  const CHUNK = 150 * 1024;
+  const total = Math.max(1, Math.ceil(fullB64.length / CHUNK));
+  const sessionId = `s_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+  let lastResult = null;
+  for (let i = 0; i < total; i++) {
+    const slice = fullB64.slice(i * CHUNK, (i + 1) * CHUNK);
+    const isLast = i === total - 1;
+    const r = await _callContainer("/photo/chunk", {
+      data: {
+        session_id: sessionId,
+        chunk_index: i,
+        total_chunks: total,
+        chunk_b64: slice,
+        filename,
+        is_last: isLast,
+      },
+    });
+    if (typeof onProgress === "function") {
+      try {
+        onProgress({ done: i + 1, total });
+      } catch (e) {}
+    }
+    if (isLast) lastResult = r;
+  }
+  return lastResult;
 }
 
 // ========== /cat /dog ==========
@@ -176,5 +224,7 @@ module.exports = {
   API_BASE,
   USE_CLOUD,
   photoTranslate,
+  photoTranslateChunked,
   voiceTranslate,
+  pingHealth,
 };
