@@ -31,8 +31,10 @@ function _readFileBase64(filePath) {
   });
 }
 
-/** 调用云托管容器（HTTPS 自动 + 鉴权 + 不用配合法域名）。 */
-function _callContainer(path, { data, header, method } = {}) {
+/** 调用云托管容器（HTTPS 自动 + 鉴权 + 不用配合法域名）。
+ *  timeoutMs 可选，默认 60s；AI 重绘等长任务路径会用 120s。
+ */
+function _callContainer(path, { data, header, method, timeoutMs } = {}) {
   return new Promise((resolve, reject) => {
     if (!wx.cloud || !wx.cloud.callContainer) {
       reject(new Error("当前微信版本不支持 wx.cloud.callContainer"));
@@ -50,7 +52,7 @@ function _callContainer(path, { data, header, method } = {}) {
         },
         header || {}
       ),
-      timeout: 60000,
+      timeout: timeoutMs || 60000,
       success(res) {
         console.log("[callContainer ok]", path, res);
         if (res.statusCode >= 400) {
@@ -166,6 +168,9 @@ async function photoTranslateChunked(filePath, onProgress, options) {
   for (let i = 0; i < total; i++) {
     const slice = fullB64.slice(i * CHUNK, (i + 1) * CHUNK);
     const isLast = i === total - 1;
+    // AI 重绘的最后一片才是耗时路径（要等 LLM + Qwen-Image-Edit）
+    // 普通分片 60s 够用；最后一片如果开了 redraw 给 120s
+    const lastChunkTimeout = redraw ? 120000 : 90000;
     const r = await _callContainer("/photo/chunk", {
       data: {
         session_id: sessionId,
@@ -177,6 +182,7 @@ async function photoTranslateChunked(filePath, onProgress, options) {
         redraw,
         art_style: artStyle,
       },
+      timeoutMs: isLast ? lastChunkTimeout : 60000,
     });
     if (typeof onProgress === "function") {
       try {
