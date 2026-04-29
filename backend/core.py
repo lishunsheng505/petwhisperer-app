@@ -256,6 +256,42 @@ def _font(size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(_resolve_font(), size)
 
 
+# ----- 标题字体（毛笔/手写体）双字体方案 ----------------------------
+# font_title.ttf 用作大字标题（演示春风楷等毛笔体），有手作感；
+# font.ttf 继续用作正文/标签/签名（LXGW WenKai 楷书），保字符覆盖度。
+# 如果 font_title.ttf 不存在，自动 fallback 到 font.ttf，保证不崩。
+
+_font_title_path: str | None = None
+_font_title_resolved: bool = False
+
+
+def _resolve_font_title() -> str | None:
+    """返回标题字体路径，没有就返回 None（让调用方 fallback 到正文字体）。"""
+    global _font_title_path, _font_title_resolved
+    if _font_title_resolved:
+        return _font_title_path
+    _font_title_resolved = True
+
+    p = BASE_DIR / "font_title.ttf"
+    if not p.exists():
+        return None
+    try:
+        ImageFont.truetype(str(p), 20)
+    except OSError:
+        warnings.warn(f"⚠️ font_title.ttf 加载失败，标题将回退到 font.ttf: {p}")
+        return None
+    _font_title_path = str(p)
+    return _font_title_path
+
+
+def _font_title(size: int) -> ImageFont.FreeTypeFont:
+    """大字标题字体；缺失时自动 fallback 到 _font。"""
+    p = _resolve_font_title()
+    if p:
+        return ImageFont.truetype(p, size)
+    return _font(size)
+
+
 def _fs(base: int, w: int, ref: int = 1000) -> int:
     return max(int(base * w / ref), base // 2)
 
@@ -1007,7 +1043,7 @@ def _draw_title(canvas: Image.Image, text: str, W: int, y: int,
         fs = 64
     else:
         fs = 52
-    f = _font(fs)
+    f = _font_title(fs)  # 标题用毛笔字体（演示春风楷），手作感
     max_w = W - 70
     lines = _wrap_cn(text, f, max_w, d)[:3]
     if len(lines) >= 2 and len(lines[-1]) <= 2 and len(lines[-2]) >= 5:
