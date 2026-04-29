@@ -17,7 +17,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from core import resolve_voice, run_photo_job, run_voice_job
+from core import (
+    ART_STYLES,
+    DEFAULT_ART_STYLE,
+    resolve_voice,
+    run_photo_job,
+    run_voice_job,
+)
 from wx_security import ContentUnsafeError, check_image_safe, check_text_safe
 
 logger = logging.getLogger("petwhisperer")
@@ -28,6 +34,76 @@ app = FastAPI(
     description="宠物翻译官 · 照片 / 猫语 / 狗语",
     version="1.0.0",
 )
+
+# ============================================================
+# AI 重绘日配额（每个 openid 每自然日 N 次）
+# ------------------------------------------------------------
+# 单实例内存计数器：云托管务必把 photo 服务的"最小=最大实例数"
+# 都设为 1，否则不同实例会各自计数导致超额。
+# 上线后接入数据库（云开发集合）即可分布式准确计数。
+# ============================================================
+REDRAW_DAILY_LIMIT = int(os.getenv("REDRAW_DAILY_LIMIT", "5"))
+_REDRAW_QUOTA: dict[str, int] = {}
+
+
+def _wx_openid(request: Request) -> str:
+    """微信云托管会自动注入 X-WX-OPENID；本地/开发工具调试时为空。"""
+    return (request.headers.get("X-WX-OPENID") or "").strip()
+
+
+def _quota_key(openid: str) -> str:
+    today = time.strftime("%Y-%m-%d")
+    return f"{openid or 'anon'}:{today}"
+
+
+def _redraw_remaining(openid: str) -> int:
+    used = _REDRAW_QUOTA.get(_quota_key(openid), 0)
+    return max(0, REDRAW_DAILY_LIMIT - used)
+
+
+def _redraw_consume(openid: str, art_style: str = "") -> int:
+    """成功使用一次后调用：+1 已用，返回新剩余。
+
+    同时打一行结构化日志方便云托管「运行日志」搜索 `[REDRAW]` 监控消耗。
+    """
+    k = _quota_key(openid)
+    _REDRAW_QUOTA[k] = _REDRAW_QUOTA.get(k, 0) + 1
+    used = _REDRAW_QUOTA[k]
+    remaining = max(0, REDRAW_DAILY_LIMIT - used)
+    short = (openid or "anon")[:8] + "***" if openid else "anon"
+    logger.info(
+        "[REDRAW] openid=%s style=%s used=%d/%d remaining=%d cost=$0.04",
+        short, art_style or "?", used, REDRAW_DAILY_LIMIT, remaining,
+    )
+    return remaining
+
+
+def _parse_photo_options(body_or_form: Any) -> tuple[bool, str]:
+    """从 JSON dict 或 form 里读 redraw + art_style。
+
+    redraw:    "1"/"true"/True 都视为 True
+    art_style: 必须是 ART_STYLES 的 key，否则回退默认
+    """
+    if hasattr(body_or_form, "get"):
+        raw_redraw = body_or_form.get("redraw")
+        raw_style = body_or_form.get("art_style")
+    else:
+        raw_redraw = None
+        raw_style = None
+
+    redraw = False
+    if isinstance(raw_redraw, bool):
+        redraw = raw_redraw
+    elif isinstance(raw_redraw, (int, float)):
+        redraw = bool(raw_redraw)
+    elif isinstance(raw_redraw, str):
+        redraw = raw_redraw.strip().lower() in ("1", "true", "yes", "y", "on")
+
+    art_style = (str(raw_style).strip() if raw_style else "") or DEFAULT_ART_STYLE
+    if art_style not in ART_STYLES:
+        art_style = DEFAULT_ART_STYLE
+    return redraw, art_style
+
 
 _origins = os.getenv("CORS_ORIGINS", "*").strip()
 _allow = ["*"] if _origins == "*" else [o.strip() for o in _origins.split(",") if o.strip()]
@@ -52,12 +128,15 @@ def _is_json_request(request: Request) -> bool:
     return "application/json" in ct
 
 
-async def _read_image_input(request: Request) -> tuple[bytes, str]:
+async def _read_image_input(
+    request: Request,
+) -> tuple[bytes, str, dict[str, Any]]:
     """
-    从请求里读出图片字节 + 文件名。
-      - JSON: { "file_b64": "<base64>", "filename": "x.heic" }
+    从请求里读出图片字节 + 文件名 + 业务 options。
+      - JSON: { "file_b64": "<base64>", "filename": "x.heic",
+                "redraw": bool, "art_style": "ghibli" ... }
               （兼容字段名：image_b64 / file / image / data）
-      - multipart: 字段名 file
+      - multipart: 字段名 file，其它字段直接放 options（form 字段都是字符串）
     """
     if _is_json_request(request):
         try:
@@ -80,7 +159,7 @@ async def _read_image_input(request: Request) -> tuple[bytes, str]:
         if not raw:
             raise HTTPException(status_code=400, detail="空文件")
         filename = (body.get("filename") or "upload.jpg").strip() or "upload.jpg"
-        return raw, filename
+        return raw, filename, body if isinstance(body, dict) else {}
 
     form = await request.form()
     f = form.get("file")
@@ -91,7 +170,10 @@ async def _read_image_input(request: Request) -> tuple[bytes, str]:
     raw = await f.read()
     if not raw:
         raise HTTPException(status_code=400, detail="空文件")
-    return raw, f.filename
+    opts: dict[str, Any] = {
+        k: form.get(k) for k in ("redraw", "art_style") if form.get(k) is not None
+    }
+    return raw, f.filename, opts
 
 
 async def _read_voice_input(
@@ -191,6 +273,20 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/photo/quota")
+def photo_quota(request: Request) -> JSONResponse:
+    """查询当前 openid 当日 AI 重绘剩余次数。"""
+    openid = _wx_openid(request)
+    return JSONResponse({
+        "ok": True,
+        "redraw_remaining": _redraw_remaining(openid),
+        "redraw_limit": REDRAW_DAILY_LIMIT,
+        "art_styles": [
+            {"key": k, "label": v["label"]} for k, v in ART_STYLES.items()
+        ],
+    })
+
+
 # ============================================================
 # /photo/chunk —— 分片上传，绕开 callContainer 1MB 请求体限制
 # ============================================================
@@ -283,14 +379,25 @@ async def photo_chunk(request: Request) -> JSONResponse:
     if not full:
         raise HTTPException(status_code=400, detail="组装后文件为空")
 
-    # 微信内容安全：图片同步检测（仅 < 1MB 的图）
+    redraw, art_style = _parse_photo_options(body)
+    openid = _wx_openid(request)
+
+    if redraw and _redraw_remaining(openid) <= 0:
+        raise HTTPException(
+            status_code=429,
+            detail=f"今日 AI 重绘次数已用完（每日 {REDRAW_DAILY_LIMIT} 次），明天再来吧～",
+        )
+
     try:
         check_image_safe(full, filename=filename)
     except ContentUnsafeError as e:
         raise HTTPException(status_code=400, detail=e.message) from e
 
     try:
-        analysis, poster_png = run_photo_job(full, filename)
+        analysis, poster_png = run_photo_job(
+            full, filename, redraw=redraw, art_style=art_style)
+        if analysis.get("redraw_used"):
+            _redraw_consume(openid, art_style)
     except HTTPException:
         raise
     except ValueError as e:
@@ -304,6 +411,8 @@ async def photo_chunk(request: Request) -> JSONResponse:
         "done": True,
         "analysis": analysis,
         "poster_image_base64": base64.b64encode(poster_png).decode("ascii"),
+        "redraw_remaining": _redraw_remaining(openid),
+        "redraw_limit": REDRAW_DAILY_LIMIT,
     })
 
 
@@ -451,17 +560,41 @@ async def photo_translate(request: Request) -> JSONResponse:
     """上传宠物照片，返回 AI 分析 JSON + 海报 PNG（base64）。
 
     入参（任选其一）：
-      - multipart/form-data: file=<图片二进制>
-      - application/json:    {"file_b64": "<base64>", "filename": "x.heic"}
+      - multipart/form-data: file=<图片二进制>, redraw="1", art_style="ghibli"
+      - application/json:    {
+            "file_b64": "<base64>", "filename": "x.heic",
+            "redraw": false,                       # 是否使用 AI 重绘（付费）
+            "art_style": "ghibli|oil|ink|pixel|lego"
+        }
+
+    返回：{
+      ok, analysis, poster_image_base64, poster_mime,
+      redraw_remaining,    # 当日 AI 重绘剩余次数
+      redraw_limit         # 当日总额度
+    }
     """
+    openid = _wx_openid(request)
     try:
-        raw, filename = await _read_image_input(request)
+        raw, filename, opts = await _read_image_input(request)
+        redraw, art_style = _parse_photo_options(opts)
+
+        if redraw and _redraw_remaining(openid) <= 0:
+            raise HTTPException(
+                status_code=429,
+                detail=f"今日 AI 重绘次数已用完（每日 {REDRAW_DAILY_LIMIT} 次），明天再来吧～",
+            )
+
         # 微信内容安全：图片同步检测（仅 < 1MB 的图，超出依赖 LLM prompt 兜底）
         try:
             check_image_safe(raw, filename=filename)
         except ContentUnsafeError as e:
             raise HTTPException(status_code=400, detail=e.message) from e
-        analysis, poster_png = run_photo_job(raw, filename)
+
+        analysis, poster_png = run_photo_job(
+            raw, filename, redraw=redraw, art_style=art_style)
+
+        if analysis.get("redraw_used"):
+            _redraw_consume(openid, art_style)
     except HTTPException:
         raise
     except ValueError as e:
@@ -480,6 +613,8 @@ async def photo_translate(request: Request) -> JSONResponse:
             "analysis": analysis,
             "poster_image_base64": b64,
             "poster_mime": "image/png",
+            "redraw_remaining": _redraw_remaining(openid),
+            "redraw_limit": REDRAW_DAILY_LIMIT,
         }
     )
 

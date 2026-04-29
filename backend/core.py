@@ -395,6 +395,182 @@ def get_pet_insight(img: Image.Image) -> dict:
 
 
 # ================================================================
+#  AI 重绘 — 调硅基流动 Qwen-Image-Edit 做风格化（付费功能）
+# ================================================================
+
+REDRAW_MODEL = "Qwen/Qwen-Image-Edit-2509"
+REDRAW_URL = f"{API_BASE}/images/generations"
+
+# art_style → 风格化 prompt（英文 prompt 模型表现更稳）
+ART_STYLES: dict[str, dict] = {
+    "ghibli": {
+        "label": "宫崎骏吉卜力",
+        "prompt": (
+            "Redraw this pet portrait in Studio Ghibli anime style by Hayao Miyazaki. "
+            "Soft watercolor textures, warm sunlight, lush nature background, "
+            "hand-drawn aesthetic, gentle pastel palette. "
+            "IMPORTANT: keep the pet's species, breed, fur color and pose identical "
+            "to the original. Do not add humans. No text in the image."
+        ),
+    },
+    "oil": {
+        "label": "古典油画",
+        "prompt": (
+            "Redraw this pet portrait as a classical oil painting in Renaissance style. "
+            "Rich textured brushstrokes, dramatic chiaroscuro lighting, deep saturated colors, "
+            "museum-quality composition, dark elegant background. "
+            "IMPORTANT: preserve the pet's species, breed, fur color and pose. "
+            "No humans, no text in the image."
+        ),
+    },
+    "ink": {
+        "label": "中国水墨",
+        "prompt": (
+            "Redraw this pet portrait as traditional Chinese ink wash painting (shuimo). "
+            "Minimalist black ink on rice paper, expressive sumi-e brushstrokes, "
+            "lots of negative space, zen atmosphere. "
+            "IMPORTANT: preserve the pet's silhouette, breed and gesture. "
+            "No humans, no text in the image."
+        ),
+    },
+    "pixel": {
+        "label": "像素风",
+        "prompt": (
+            "Redraw this pet portrait as 16-bit pixel art game sprite. "
+            "Limited color palette, crisp pixel edges, retro game aesthetic, "
+            "centered subject on a soft pastel background. "
+            "IMPORTANT: preserve the pet's species, body shape and color. "
+            "No humans, no text in the image."
+        ),
+    },
+    "lego": {
+        "label": "乐高积木",
+        "prompt": (
+            "Redraw this pet as a LEGO minifigure / brick photograph. "
+            "Glossy plastic surfaces, studio lighting, plain background, "
+            "playful toy aesthetic. "
+            "IMPORTANT: preserve the pet's distinguishing color and shape. "
+            "No humans, no text in the image."
+        ),
+    },
+}
+
+DEFAULT_ART_STYLE = "ghibli"
+
+
+def redraw_image(
+    img: Image.Image,
+    art_style: str = DEFAULT_ART_STYLE,
+    *,
+    timeout: int = 90,
+) -> Image.Image:
+    """调用硅基流动 Qwen-Image-Edit 对宠物照片做风格化重绘。
+
+    Args:
+        img:        用户原图（PIL.Image，自动缩到 ≤1024 长边）
+        art_style:  ART_STYLES 中的 key（默认 ghibli）
+        timeout:    单次 HTTP 超时（秒）。模型推理 + 下载约 15-40s
+
+    Returns:
+        重绘后的 RGB PIL.Image。
+
+    Raises:
+        ValueError: 缺 API Key 或参数非法
+        RuntimeError: 调用失败 / 超时 / 响应缺字段
+    """
+    spec = ART_STYLES.get(art_style) or ART_STYLES[DEFAULT_ART_STYLE]
+
+    api_key = os.getenv("SILICONFLOW_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError("未配置 SILICONFLOW_API_KEY")
+
+    # 缩到长边 1024 内：Qwen-Image-Edit 没有 image_size 入参，
+    # 输入太大会显著拖慢推理 + 撑爆 base64 体积
+    max_side = 1024
+    w, h = img.size
+    scale = min(1.0, max_side / max(w, h))
+    if scale < 1.0:
+        small = img.resize((int(w * scale), int(h * scale)),
+                           Image.Resampling.LANCZOS)
+    else:
+        small = img
+
+    buf = BytesIO()
+    small.convert("RGB").save(buf, format="PNG", optimize=True)
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    image_data_url = f"data:image/png;base64,{b64}"
+
+    payload = {
+        "model": REDRAW_MODEL,
+        "prompt": spec["prompt"],
+        "image": image_data_url,
+        "num_inference_steps": 20,
+        # 官方建议 Qwen-Image 系列 cfg 用 4.0；过小会丢文本/语义
+        "cfg": 4.0,
+    }
+
+    import urllib.request
+    import urllib.error
+
+    req = urllib.request.Request(
+        REDRAW_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read()
+    except urllib.error.HTTPError as e:
+        snippet = ""
+        try:
+            snippet = e.read().decode("utf-8", errors="ignore")[:300]
+        except Exception:
+            pass
+        if e.code == 401:
+            raise RuntimeError("AI 重绘鉴权失败，请检查 SILICONFLOW_API_KEY") from e
+        if e.code == 429:
+            raise RuntimeError("AI 重绘服务繁忙，请稍后再试") from e
+        if e.code in (503, 504):
+            raise RuntimeError("AI 重绘服务暂时不可用，请稍后再试") from e
+        raise RuntimeError(f"AI 重绘失败 ({e.code}): {snippet}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"AI 重绘网络错误：{e.reason}") from e
+    except Exception as e:
+        raise RuntimeError(f"AI 重绘请求失败：{e}") from e
+
+    try:
+        result = json.loads(body)
+    except json.JSONDecodeError as e:
+        raise RuntimeError("AI 重绘响应非 JSON") from e
+
+    images = result.get("images") or []
+    if not images:
+        raise RuntimeError(f"AI 重绘响应缺少 images：{str(result)[:200]}")
+    img_url = images[0].get("url") if isinstance(images[0], dict) else None
+    if not img_url:
+        raise RuntimeError(f"AI 重绘响应缺少 url：{str(result)[:200]}")
+
+    try:
+        with urllib.request.urlopen(img_url, timeout=timeout) as resp:
+            img_bytes = resp.read()
+    except Exception as e:
+        raise RuntimeError(f"AI 重绘图片下载失败：{e}") from e
+
+    try:
+        out = Image.open(BytesIO(img_bytes)).convert("RGB")
+    except Exception as e:
+        raise RuntimeError(f"AI 重绘返回的不是有效图片：{e}") from e
+
+    return out
+
+
+# ================================================================
 #  水印 30%
 # ================================================================
 
@@ -499,14 +675,413 @@ def _kawaii_bubble_bbox(
 
 
 # ================================================================
-#  渲染器 · MOODY — 王家卫电影截屏
-#  原图尺寸不变，上下覆盖半透明黑色遮幅，双语字幕
+#  渲染器 v2 · 拍立得手账风（2026-04-29 重写）
+#  统一输出 1080×1440（3:4）海报，4 种 vibe 都走同一模板，
+#  通过滤镜 / 配色 / 文案微调差异化（避免每种风格效果都"low"）
+#
+#  布局（自上而下）：
+#    ┌──────────────────────────────────────────┐
+#    │ 米色信纸背景（带极淡横纹理）             │
+#    │   ╱胶带╲              ╱胶带╲            │
+#    │   ┌──────────────────────────┐           │
+#    │   │   倾斜白边照片           │           │
+#    │   │   (cover crop)           │           │
+#    │   │                          │           │
+#    │   │   --签名条 04.29 · 拍立得│           │
+#    │   └──────────────────────────┘           │
+#    │                                          │
+#    │       【超大字标题 quote_cn】            │
+#    │       ──────                             │
+#    │       By 喵咪 × 04.29                    │
+#    │                                          │
+#    │     #萌宠日常  #毛孩子  #治愈            │
+#    │                                          │
+#    │       ▢   ▢   ▢                          │
+#    │     #FBF6 #A093 #3D2E                    │
+#    │                                          │
+#    │ ▲                            [AI 生成内容]│
+#    └──────────────────────────────────────────┘
 # ================================================================
 
+# ---- v2 调色板（米色信纸系） --------------------------------
+_PV2 = {
+    "bg": (251, 246, 238),
+    "bg_line": (180, 160, 130, 22),
+    "title": (61, 46, 31),
+    "subtitle": (139, 115, 85),
+    "accent": (201, 91, 0),
+    "tag_bg": (255, 244, 230),
+    "tag_fg": (201, 91, 0),
+    "tape_a": (255, 200, 180, 200),
+    "tape_b": (220, 200, 170, 200),
+    "card": (255, 255, 255),
+    "shadow": (60, 40, 20, 110),
+}
+
+# 不同 vibe 的微调（颜色 + 滤镜 + 标语前缀）
+_VIBE_THEMES = {
+    "moody": {
+        "bg": (240, 234, 225),
+        "title": (35, 30, 28),
+        "accent": (90, 60, 50),
+        "tape_a": (180, 175, 165, 200),
+        "tape_b": (160, 155, 150, 200),
+        "tag_bg": (235, 230, 222),
+        "tag_fg": (90, 60, 50),
+    },
+    "retro": {
+        "bg": (245, 232, 210),
+        "title": (90, 50, 20),
+        "accent": (175, 80, 30),
+        "tape_a": (220, 175, 130, 210),
+        "tape_b": (190, 145, 100, 210),
+        "tag_bg": (250, 232, 210),
+        "tag_fg": (140, 70, 25),
+    },
+    "kawaii": {
+        "bg": (253, 245, 247),
+        "title": (188, 70, 110),
+        "accent": (228, 95, 130),
+        "tape_a": (255, 195, 215, 210),
+        "tape_b": (255, 220, 200, 210),
+        "tag_bg": (255, 235, 240),
+        "tag_fg": (200, 70, 110),
+    },
+    "minimalism": {},  # 用默认
+}
+
+
+def _hex_to_rgb(s: str) -> tuple[int, int, int]:
+    s = (s or "").strip().lstrip("#")
+    if len(s) == 3:
+        s = "".join(c * 2 for c in s)
+    if len(s) != 6:
+        return (200, 200, 200)
+    try:
+        return int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16)
+    except ValueError:
+        return (200, 200, 200)
+
+
+def _theme_for(vibe: str) -> dict:
+    base = dict(_PV2)
+    base.update(_VIBE_THEMES.get(vibe, {}))
+    return base
+
+
+def _bg_paper(W: int, H: int, theme: dict) -> Image.Image:
+    """米白色信纸背景 + 极淡横纹（模拟手账纸质感）。"""
+    canvas = Image.new("RGBA", (W, H), theme["bg"] + (255,))
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(overlay)
+    line_step = 38
+    for y in range(line_step, H, line_step):
+        d.line([(0, y), (W, y)], fill=theme["bg_line"], width=1)
+    return Image.alpha_composite(canvas, overlay)
+
+
+def _draw_washi_tapes(canvas: Image.Image, W: int, H: int, theme: dict) -> None:
+    """顶部两条手撕胶带（半透明色块 + 微旋转）。"""
+    tape_w, tape_h = 220, 50
+
+    t1 = Image.new("RGBA", (tape_w, tape_h), theme["tape_a"])
+    t1 = t1.rotate(-8, resample=Image.Resampling.BICUBIC, expand=True)
+    canvas.alpha_composite(t1, dest=(60, 40))
+
+    t2 = Image.new("RGBA", (tape_w, tape_h), theme["tape_b"])
+    t2 = t2.rotate(7, resample=Image.Resampling.BICUBIC, expand=True)
+    canvas.alpha_composite(t2, dest=(W - 220 - 60, 40))
+
+
+def _cover_fit(photo: Image.Image, target_w: int, target_h: int) -> Image.Image:
+    """把照片等比缩放后裁切到目标尺寸（cover 模式）。"""
+    src_w, src_h = photo.size
+    target_ratio = target_w / target_h
+    src_ratio = src_w / src_h
+    if src_ratio > target_ratio:
+        new_w = int(src_h * target_ratio)
+        x0 = (src_w - new_w) // 2
+        photo = photo.crop((x0, 0, x0 + new_w, src_h))
+    else:
+        new_h = int(src_w / target_ratio)
+        y0 = (src_h - new_h) // 2
+        photo = photo.crop((0, y0, src_w, y0 + new_h))
+    return photo.resize((target_w, target_h), Image.Resampling.LANCZOS)
+
+
+def _build_photo_block(
+    photo: Image.Image,
+    frame_w: int,
+    frame_h: int,
+    tilt: float,
+    theme: dict,
+) -> Image.Image:
+    """白边相框（顶/侧 32px，底 100px 留签名空间）+ 阴影 + 倾斜。"""
+    PAD_TOP, PAD_SIDE, PAD_BOT = 32, 32, 100
+    inner_w = frame_w - PAD_SIDE * 2
+    inner_h = frame_h - PAD_TOP - PAD_BOT
+
+    photo_fit = _cover_fit(photo, inner_w, inner_h)
+
+    card = Image.new("RGB", (frame_w, frame_h), theme["card"])
+    card.paste(photo_fit, (PAD_SIDE, PAD_TOP))
+
+    d = ImageDraw.Draw(card)
+    f_sig = _font(28)
+    sig = datetime.now().strftime("%m.%d") + " · 拍立得日记"
+    bb = d.textbbox((0, 0), sig, font=f_sig)
+    sx = (frame_w - (bb[2] - bb[0])) // 2
+    sy = frame_h - PAD_BOT + (PAD_BOT - (bb[3] - bb[1])) // 2 - 8
+    d.text((sx - bb[0], sy - bb[1]), sig, fill=theme["subtitle"], font=f_sig)
+
+    margin = 60
+    big_w = frame_w + margin * 2
+    big_h = frame_h + margin * 2
+    composite = Image.new("RGBA", (big_w, big_h), (0, 0, 0, 0))
+
+    shadow = Image.new("RGBA", (frame_w, frame_h), theme["shadow"])
+    shadow = shadow.filter(ImageFilter.GaussianBlur(radius=18))
+    composite.alpha_composite(shadow, dest=(margin + 8, margin + 14))
+
+    composite.alpha_composite(card.convert("RGBA"), dest=(margin, margin))
+
+    return composite.rotate(
+        tilt, resample=Image.Resampling.BICUBIC, expand=True)
+
+
+def _wrap_cn(text: str, font: ImageFont.FreeTypeFont, max_w: int,
+             draw: ImageDraw.ImageDraw) -> list[str]:
+    """中文按字符宽度断行。"""
+    lines: list[str] = []
+    cur = ""
+    for ch in text:
+        test = cur + ch
+        bb = draw.textbbox((0, 0), test, font=font)
+        if bb[2] - bb[0] > max_w and cur:
+            lines.append(cur)
+            cur = ch
+        else:
+            cur = test
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _draw_title(canvas: Image.Image, text: str, W: int, y: int,
+                theme: dict) -> int:
+    """大字标题（自动字号 + 居中 + 微阴影）。返回末尾 y。"""
+    d = ImageDraw.Draw(canvas)
+    if len(text) <= 12:
+        fs = 72
+    elif len(text) <= 18:
+        fs = 60
+    elif len(text) <= 26:
+        fs = 50
+    else:
+        fs = 44
+    f = _font(fs)
+    max_w = W - 120
+    lines = _wrap_cn(text, f, max_w, d)[:3]
+    line_h = int(fs * 1.32)
+    cur_y = y
+    for line in lines:
+        bb = d.textbbox((0, 0), line, font=f)
+        tw = bb[2] - bb[0]
+        tx = (W - tw) // 2
+        d.text((tx - bb[0] + 2, cur_y - bb[1] + 3), line,
+               fill=(0, 0, 0, 35), font=f)
+        d.text((tx - bb[0], cur_y - bb[1]), line,
+               fill=theme["title"], font=f)
+        cur_y += line_h
+    return cur_y
+
+
+def _draw_subtitle(canvas: Image.Image, text: str, W: int, y: int,
+                   theme: dict) -> int:
+    d = ImageDraw.Draw(canvas)
+    f = _font(26)
+    bb = d.textbbox((0, 0), text, font=f)
+    tx = (W - (bb[2] - bb[0])) // 2
+    d.text((tx - bb[0], y - bb[1]), text, fill=theme["subtitle"], font=f)
+
+    line_y = y + (bb[3] - bb[1]) + 18
+    line_w = 80
+    d.rounded_rectangle(
+        [(W - line_w) // 2, line_y, (W + line_w) // 2, line_y + 4],
+        radius=2, fill=theme["accent"])
+    return line_y + 14
+
+
+def _make_tags(data: dict) -> list[str]:
+    pets = data.get("pets") or []
+    tags: list[str] = []
+    seen: set[str] = set()
+    for p in pets:
+        t = (p.get("type") or "").strip()
+        if t and t not in seen:
+            seen.add(t)
+            tags.append("#" + t)
+    if not tags:
+        tags.append("#萌宠日常")
+    extras = ["#毛孩子", "#治愈系", "#今日份可爱"]
+    for e in extras:
+        if len(tags) >= 3:
+            break
+        if e not in tags:
+            tags.append(e)
+    return tags[:3]
+
+
+def _draw_tags(canvas: Image.Image, tags: list[str], W: int, y: int,
+               theme: dict) -> int:
+    d = ImageDraw.Draw(canvas)
+    f = _font(24)
+    pad_x, pad_y, gap = 22, 11, 14
+
+    sizes = [d.textbbox((0, 0), t, font=f) for t in tags]
+    widths = [(b[2] - b[0]) for b in sizes]
+    heights = [(b[3] - b[1]) for b in sizes]
+    h = max(heights) + pad_y * 2
+    radius = h // 2
+
+    total_w = sum(w + pad_x * 2 for w in widths) + gap * (len(tags) - 1)
+    cur_x = (W - total_w) // 2
+
+    for tag, bb, tw in zip(tags, sizes, widths):
+        bw = tw + pad_x * 2
+        d.rounded_rectangle([cur_x, y, cur_x + bw, y + h],
+                            radius=radius, fill=theme["tag_bg"])
+        d.text((cur_x + pad_x - bb[0], y + pad_y - bb[1]), tag,
+               fill=theme["tag_fg"], font=f)
+        cur_x += bw + gap
+    return y + h
+
+
+def _draw_palette_strip(canvas: Image.Image, palette: list[str], W: int,
+                        y: int, theme: dict) -> int:
+    """色卡条：3 个圆角色块 + 下方 hex 文字。"""
+    d = ImageDraw.Draw(canvas)
+    block_w, block_h = 130, 86
+    gap = 28
+    n = min(3, len(palette))
+    if n == 0:
+        return y
+    total_w = block_w * n + gap * (n - 1)
+    cur_x = (W - total_w) // 2
+
+    f = _font(20)
+    for hex_color in palette[:n]:
+        rgb = _hex_to_rgb(hex_color)
+        d.rounded_rectangle([cur_x, y, cur_x + block_w, y + block_h],
+                            radius=14, fill=rgb,
+                            outline=(255, 255, 255, 220), width=2)
+        sh = Image.new("RGBA", (block_w, block_h), (0, 0, 0, 0))
+        ImageDraw.Draw(sh).rounded_rectangle(
+            [0, 0, block_w, block_h], radius=14, fill=(0, 0, 0, 50))
+        sh = sh.filter(ImageFilter.GaussianBlur(radius=4))
+        canvas.alpha_composite(sh, dest=(cur_x + 4, y + 6))
+        d.rounded_rectangle([cur_x, y, cur_x + block_w, y + block_h],
+                            radius=14, fill=rgb,
+                            outline=(255, 255, 255, 220), width=2)
+
+        txt = "#" + (hex_color or "").lstrip("#").upper()
+        bb = d.textbbox((0, 0), txt, font=f)
+        tx = cur_x + (block_w - (bb[2] - bb[0])) // 2
+        ty = y + block_h + 12
+        d.text((tx - bb[0], ty - bb[1]), txt, fill=theme["subtitle"], font=f)
+
+        cur_x += block_w + gap
+    return y + block_h + 44
+
+
+def _draw_corner_doodles(canvas: Image.Image, W: int, H: int,
+                         theme: dict) -> None:
+    """左下三角 + 右上小圆点矩阵（极简几何装饰）。"""
+    d = ImageDraw.Draw(canvas)
+    pts = [(58, H - 96), (94, H - 60), (58, H - 60)]
+    d.polygon(pts, fill=theme["accent"])
+
+    cx, cy = W - 76, 178
+    for i in range(3):
+        for j in range(3):
+            r = 4
+            x = cx - i * 18
+            y = cy + j * 18
+            d.ellipse([x - r, y - r, x + r, y + r], fill=theme["subtitle"])
+
+
 def render_poster(img: Image.Image, data: dict) -> Image.Image:
+    """统一拍立得手账风海报（v2）。
+
+    Args:
+        img: 用户原图（PIL Image，已读取并去 EXIF 旋转）
+        data: AI 返回的语义字典：
+              quote_cn / quote_en / vibe / palette / pets[]
+    Returns:
+        1080×1440 RGB 海报（已加 AI 生成标识）
+    """
+    W, H = 1080, 1440
+    style = (data.get("vibe") or "minimalism").lower()
+    theme = _theme_for(style)
+
+    if style == "moody":
+        photo = apply_cool_tint(img)
+    elif style == "retro":
+        photo = apply_grain(apply_vintage(img), intensity=14)
+    elif style == "kawaii":
+        photo = apply_soft_light(img)
+    else:
+        photo = img.copy()
+
+    canvas = _bg_paper(W, H, theme)
+
+    _draw_washi_tapes(canvas, W, H, theme)
+
+    tilt = -1.6 if style != "retro" else -2.6
+    photo_block = _build_photo_block(
+        photo, frame_w=900, frame_h=720, tilt=tilt, theme=theme)
+    pbx = (W - photo_block.width) // 2
+    pby = 110
+    canvas.alpha_composite(photo_block, dest=(pbx, pby))
+
+    title = (data.get("quote_cn") or "今天也是被治愈的一天").strip()
+    next_y = pby + photo_block.height - 40
+    next_y = _draw_title(canvas, title, W, next_y, theme)
+
+    pets = data.get("pets") or []
+    pet_types: list[str] = []
+    seen: set[str] = set()
+    for p in pets[:2]:
+        t = (p.get("type") or "").strip()
+        if t and t not in seen:
+            seen.add(t)
+            pet_types.append(t)
+    if pet_types:
+        subtitle = "By " + " × ".join(pet_types) + " · " + datetime.now().strftime("%m.%d")
+    else:
+        subtitle = "AI 萌宠心语 · " + datetime.now().strftime("%Y.%m.%d")
+    next_y = _draw_subtitle(canvas, subtitle, W, next_y + 16, theme)
+
+    tags = _make_tags(data)
+    next_y = _draw_tags(canvas, tags, W, next_y + 24, theme)
+
+    palette = data.get("palette") or ["#FBF6EE", "#A0937D", "#3D2E1F"]
+    _draw_palette_strip(canvas, palette, W, next_y + 28, theme)
+
+    _draw_corner_doodles(canvas, W, H, theme)
+
+    poster = canvas.convert("RGB")
+    return _watermark(poster)
+
+
+# ================================================================
+#  渲染器 v1（已停用，保留代码以备回滚 — 2026-04-29）
+#  如需启用，把下面的 _render_poster_v1 改名回 render_poster 即可。
+# ================================================================
+
+def _render_poster_v1(img: Image.Image, data: dict) -> Image.Image:
     style = data.get("vibe", "minimalism").lower()
 
-    # ── STEP 1：滤镜先行 ──
     if style == "moody":
         canvas = apply_cool_tint(img)
     elif style == "retro":
@@ -1283,8 +1858,28 @@ def analysis_for_response(data: dict) -> dict:
     return out
 
 
-def run_photo_job(image_bytes: bytes, filename: str = "upload.jpg") -> tuple[dict, bytes]:
-    """照片分析 + 海报 PNG bytes。支持 JPG/PNG/WEBP/HEIC/HEIF/BMP/GIF。"""
+def run_photo_job(
+    image_bytes: bytes,
+    filename: str = "upload.jpg",
+    *,
+    redraw: bool = False,
+    art_style: str = DEFAULT_ART_STYLE,
+) -> tuple[dict, bytes]:
+    """照片分析 + 海报 PNG bytes。
+
+    Args:
+        image_bytes: 用户原图字节（JPG/PNG/WEBP/HEIC/HEIF/BMP/GIF）
+        filename:    含扩展名的原文件名
+        redraw:      True 时先调 Qwen-Image-Edit 做 AI 风格化重绘，
+                     再用风格化图渲染海报（付费功能）
+        art_style:   redraw=True 时使用的风格 key（见 ART_STYLES）
+
+    Returns:
+        (analysis_dict, poster_png_bytes)。analysis 里会带：
+            - redraw_used: bool        是否真的做了重绘
+            - redraw_style: str|None   实际使用的风格
+            - redraw_error: str|None   重绘失败时的错误信息
+    """
     raw = load_image_any(image_bytes, filename)
     img = crop_watermark(raw)
     try:
@@ -1293,11 +1888,30 @@ def run_photo_job(image_bytes: bytes, filename: str = "upload.jpg") -> tuple[dic
         img.save(str(save_path), format="JPEG", quality=95)
     except OSError:
         pass
+
     data = get_pet_insight(img)
-    poster = render_poster(img, data)
+
+    poster_src = img
+    redraw_used = False
+    redraw_error: str | None = None
+    if redraw:
+        try:
+            poster_src = redraw_image(img, art_style=art_style)
+            redraw_used = True
+        except Exception as e:
+            # 失败时回退原图渲染：避免吃掉用户额度但啥都没看到
+            redraw_error = str(e)
+            poster_src = img
+
+    poster = render_poster(poster_src, data)
     buf = BytesIO()
     poster.save(buf, format="PNG")
-    return analysis_for_response(data), buf.getvalue()
+
+    analysis = analysis_for_response(data)
+    analysis["redraw_used"] = redraw_used
+    analysis["redraw_style"] = art_style if redraw_used else None
+    analysis["redraw_error"] = redraw_error
+    return analysis, buf.getvalue()
 
 
 def run_voice_job(

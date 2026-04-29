@@ -64,15 +64,59 @@
         </view>
       </view>
 
+      <!-- 海报模式切换：原图 / AI 重绘 -->
+      <view class="mode-block">
+        <view class="mode-segment">
+          <view
+            class="mode-pill {{mode === 'origin' ? 'active' : ''}}"
+            data-mode="origin"
+            bindtap="switchMode"
+          >
+            <view class="mode-pill-title">📷 原图模板</view>
+            <view class="mode-pill-sub">免费 · 不限次</view>
+          </view>
+          <view
+            class="mode-pill {{mode === 'redraw' ? 'active' : ''}}"
+            data-mode="redraw"
+            bindtap="switchMode"
+          >
+            <view class="mode-pill-title">🎨 AI 重绘</view>
+            <view class="mode-pill-sub">
+              <text wx:if="{{redrawLimit > 0}}">今日剩余 {{redrawRemaining}}/{{redrawLimit}}</text>
+              <text wx:else>风格化重绘</text>
+            </view>
+          </view>
+        </view>
+
+        <!-- 风格选择（仅 AI 重绘模式显示） -->
+        <view wx:if="{{mode === 'redraw'}}" class="style-list">
+          <view
+            wx:for="{{artStyleOptions}}"
+            wx:key="key"
+            class="style-chip {{artStyle === item.key ? 'active' : ''}}"
+            data-key="{{item.key}}"
+            bindtap="switchStyle"
+          >
+            <view class="style-chip-emoji">{{item.emoji}}</view>
+            <view class="style-chip-label">{{item.label}}</view>
+          </view>
+        </view>
+
+        <view wx:if="{{mode === 'redraw' && redrawRemaining === 0}}" class="quota-warn">
+          ⚠️ 今日 AI 重绘次数已用完，明天再来吧～（或先选"原图模板"）
+        </view>
+      </view>
+
       <view wx:if="{{errorMsg}}" class="error">{{errorMsg}}</view>
 
       <button
         class="btn big-btn"
         bindtap="startTranslate"
         loading="{{loading}}"
-        disabled="{{loading || !fileName}}"
+        disabled="{{loading || !fileName || (mode === 'redraw' && redrawRemaining === 0)}}"
       >
-        ✨ 生成趣味文案
+        <text wx:if="{{mode === 'redraw'}}">🎨 AI 重绘 · 生成海报（消耗 1 次）</text>
+        <text wx:else>✨ 生成趣味文案海报</text>
       </button>
     </view>
 

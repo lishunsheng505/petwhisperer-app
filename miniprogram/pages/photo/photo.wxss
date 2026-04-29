@@ -136,6 +136,109 @@
   margin-top: 32rpx;
 }
 
+/* ===== 海报模式选择（原图 / AI 重绘） ===== */
+.mode-block {
+  margin-top: 28rpx;
+  padding: 24rpx 24rpx 20rpx;
+  background: linear-gradient(180deg, #FFFAF5 0%, #FFF4E6 100%);
+  border-radius: 24rpx;
+  border: 2rpx solid #FFE2C8;
+}
+
+.mode-segment {
+  display: flex;
+  gap: 14rpx;
+}
+
+.mode-pill {
+  flex: 1;
+  padding: 18rpx 12rpx;
+  text-align: center;
+  background: #fff;
+  border: 2rpx solid #FFE2C8;
+  border-radius: 18rpx;
+  transition: all 0.18s ease;
+}
+
+.mode-pill.active {
+  border-color: var(--primary);
+  background: linear-gradient(135deg, #FF6B6B 0%, #FF8C42 100%);
+  box-shadow: 0 6rpx 18rpx rgba(255, 107, 107, 0.32);
+}
+
+.mode-pill-title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.mode-pill.active .mode-pill-title {
+  color: #fff;
+}
+
+.mode-pill-sub {
+  font-size: 22rpx;
+  color: var(--muted);
+  margin-top: 6rpx;
+}
+
+.mode-pill.active .mode-pill-sub {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* ===== AI 风格选择 chips ===== */
+.style-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 20rpx;
+  padding-top: 18rpx;
+  border-top: 2rpx dashed #FFD9B8;
+}
+
+.style-chip {
+  flex: 0 0 calc((100% - 24rpx) / 3);
+  padding: 16rpx 8rpx;
+  background: #fff;
+  border: 2rpx solid #FFE2C8;
+  border-radius: 16rpx;
+  text-align: center;
+  transition: all 0.16s ease;
+}
+
+.style-chip.active {
+  border-color: var(--primary);
+  background: #FFF0E6;
+  box-shadow: inset 0 0 0 2rpx rgba(255, 107, 107, 0.18);
+}
+
+.style-chip-emoji {
+  font-size: 36rpx;
+  line-height: 1.2;
+}
+
+.style-chip-label {
+  font-size: 22rpx;
+  color: var(--text);
+  font-weight: 600;
+  margin-top: 4rpx;
+}
+
+.style-chip.active .style-chip-label {
+  color: var(--primary);
+}
+
+.quota-warn {
+  margin-top: 18rpx;
+  padding: 14rpx 18rpx;
+  background: #FFF5E6;
+  border-left: 6rpx solid #FF8C42;
+  color: #B8590C;
+  font-size: 24rpx;
+  border-radius: 8rpx;
+  line-height: 1.5;
+}
+
 .result-card {
   position: relative;
   overflow: hidden;

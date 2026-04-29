@@ -77,13 +77,46 @@ function pingHealth() {
   return _callContainer("/health", { method: "GET" });
 }
 
+/** 查询当日 AI 重绘剩余次数 + 可选风格列表。 */
+function getPhotoQuota() {
+  if (USE_CLOUD) {
+    return _callContainer("/photo/quota", { method: "GET" });
+  }
+  return new Promise((resolve, reject) => {
+    wx.request({
+      url: `${API_BASE}/photo/quota`,
+      method: "GET",
+      timeout: 10000,
+      success(res) {
+        const j = typeof res.data === "object" ? res.data : parseJsonSafe(res.data);
+        if (res.statusCode >= 400) {
+          reject(j.detail || j.error || res.data);
+          return;
+        }
+        resolve(j);
+      },
+      fail: reject,
+    });
+  });
+}
+
 // ========== /photo ==========
 
-async function photoTranslate(filePath) {
+/** options: { redraw?: boolean, artStyle?: string } */
+async function photoTranslate(filePath, options) {
+  const opts = options || {};
+  const redraw = !!opts.redraw;
+  const artStyle = opts.artStyle || "ghibli";
+
   if (USE_CLOUD) {
     const file_b64 = await _readFileBase64(filePath);
     return _callContainer("/photo", {
-      data: { file_b64, filename: _basename(filePath) },
+      data: {
+        file_b64,
+        filename: _basename(filePath),
+        redraw,
+        art_style: artStyle,
+      },
     });
   }
   return new Promise((resolve, reject) => {
@@ -91,6 +124,10 @@ async function photoTranslate(filePath) {
       url: `${API_BASE}/photo`,
       filePath,
       name: "file",
+      formData: {
+        redraw: redraw ? "1" : "0",
+        art_style: artStyle,
+      },
       success(res) {
         const j = parseJsonSafe(res.data);
         if (res.statusCode >= 400) {
@@ -108,13 +145,17 @@ async function photoTranslate(filePath) {
 
 /**
  * 分片版照片翻译 —— 绕开 callContainer 1MB 请求体限制。
- * 每片 base64 长度 ~150KB（HTTP body 后约 200KB），任意大小图都能上传。
  *   onProgress({ done, total }) 可选，给 UI 显示上传进度。
+ *   options: { redraw?: boolean, artStyle?: string }
  */
-async function photoTranslateChunked(filePath, onProgress) {
+async function photoTranslateChunked(filePath, onProgress, options) {
+  const opts = options || {};
   if (!USE_CLOUD) {
-    return photoTranslate(filePath);
+    return photoTranslate(filePath, opts);
   }
+  const redraw = !!opts.redraw;
+  const artStyle = opts.artStyle || "ghibli";
+
   const fullB64 = await _readFileBase64(filePath);
   const filename = _basename(filePath) || "upload.jpg";
   const CHUNK = 50 * 1024;
@@ -133,6 +174,8 @@ async function photoTranslateChunked(filePath, onProgress) {
         chunk_b64: slice,
         filename,
         is_last: isLast,
+        redraw,
+        art_style: artStyle,
       },
     });
     if (typeof onProgress === "function") {
@@ -278,4 +321,5 @@ module.exports = {
   voiceTranslate,
   voiceTranslateChunked,
   pingHealth,
+  getPhotoQuota,
 };

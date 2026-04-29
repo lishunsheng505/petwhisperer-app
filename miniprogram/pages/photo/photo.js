@@ -1,6 +1,14 @@
-const { photoTranslateChunked } = require("../../utils/api.js");
+const { photoTranslateChunked, getPhotoQuota } = require("../../utils/api.js");
 const history = require("../../utils/history.js");
 const { toFriendly, withRetry, isFriendlyError } = require("../../utils/errors.js");
+
+const ART_STYLE_OPTIONS = [
+  { key: "ghibli", label: "吉卜力", emoji: "🌿" },
+  { key: "oil", label: "古典油画", emoji: "🖼️" },
+  { key: "ink", label: "中国水墨", emoji: "🖌️" },
+  { key: "pixel", label: "像素风", emoji: "👾" },
+  { key: "lego", label: "乐高积木", emoji: "🧱" },
+];
 
 const ALLOWED_EXT = ["jpg", "jpeg", "png", "webp", "heic", "heif", "bmp", "gif"];
 const PREVIEWABLE = ["jpg", "jpeg", "png", "webp", "bmp", "gif"];
@@ -77,12 +85,52 @@ Page({
     pets: [],
     posterImageSrc: "",
 
+    mode: "origin",
+    artStyle: "ghibli",
+    artStyleOptions: ART_STYLE_OPTIONS,
+    redrawRemaining: 5,
+    redrawLimit: 5,
+
     historyOpen: false,
     historyList: [],
   },
 
   onShow() {
     this.setData({ historyList: this._buildHistory() });
+    this._refreshQuota();
+  },
+
+  _refreshQuota() {
+    getPhotoQuota()
+      .then((r) => {
+        if (!r) return;
+        const next = {};
+        if (typeof r.redraw_remaining === "number") {
+          next.redrawRemaining = r.redraw_remaining;
+        }
+        if (typeof r.redraw_limit === "number") {
+          next.redrawLimit = r.redraw_limit;
+        }
+        this.setData(next);
+      })
+      .catch((e) => {
+        console.warn("[quota] 获取剩余次数失败", e);
+      });
+  },
+
+  switchMode(e) {
+    const m = e.currentTarget.dataset.mode || "origin";
+    if (m === this.data.mode) return;
+    if (m === "redraw") {
+      wx.vibrateShort({ type: "light" });
+    }
+    this.setData({ mode: m, errorMsg: "" });
+  },
+
+  switchStyle(e) {
+    const k = e.currentTarget.dataset.key;
+    if (!k || k === this.data.artStyle) return;
+    this.setData({ artStyle: k });
   },
 
   _buildHistory() {
@@ -261,20 +309,47 @@ Page({
       const finalPath = await ensureUnderLimit(path, ext);
       const finalSize = await _statSize(finalPath);
       console.log("[upload size]", finalSize, "bytes");
+      const isRedraw = this.data.mode === "redraw";
+      const apiOpts = { redraw: isRedraw, artStyle: this.data.artStyle };
       const r = await withRetry(() =>
-        photoTranslateChunked(finalPath, ({ done, total }) => {
-          const pct = Math.floor((done / total) * 100);
-          wx.showLoading({
-            title: pct < 100 ? `上传中 ${pct}%` : "生成中…",
-            mask: true,
-          });
-        })
+        photoTranslateChunked(
+          finalPath,
+          ({ done, total }) => {
+            const pct = Math.floor((done / total) * 100);
+            let title;
+            if (pct < 100) {
+              title = `上传中 ${pct}%`;
+            } else if (isRedraw) {
+              title = "AI 重绘中…(20-40s)";
+            } else {
+              title = "生成中…";
+            }
+            wx.showLoading({ title, mask: true });
+          },
+          apiOpts
+        )
       );
       clearTimeout(coldHintTimer);
 
       const a = (r && r.analysis) || {};
       const posterB64 = (r && r.poster_image_base64) || "";
       this._posterBase64 = posterB64;
+
+      const quotaPatch = {};
+      if (typeof r.redraw_remaining === "number") {
+        quotaPatch.redrawRemaining = r.redraw_remaining;
+      }
+      if (typeof r.redraw_limit === "number") {
+        quotaPatch.redrawLimit = r.redraw_limit;
+      }
+
+      if (a.redraw_error) {
+        wx.showToast({
+          title: "AI 重绘失败，已回退原图渲染",
+          icon: "none",
+          duration: 2200,
+        });
+      }
 
       let posterPath = "";
       if (posterB64) {
@@ -292,16 +367,19 @@ Page({
       }
 
       wx.hideLoading();
-      const next = {
-        loading: false,
-        quote: a.quote_cn || "",
-        persona: a.persona || "",
-        vibe: a.vibe || "",
-        vibeLabel: a.vibe_label_cn || "",
-        palette: a.palette || [],
-        pets: a.pets || [],
-        posterImageSrc: posterPath,
-      };
+      const next = Object.assign(
+        {
+          loading: false,
+          quote: a.quote_cn || "",
+          persona: a.persona || "",
+          vibe: a.vibe || "",
+          vibeLabel: a.vibe_label_cn || "",
+          palette: a.palette || [],
+          pets: a.pets || [],
+          posterImageSrc: posterPath,
+        },
+        quotaPatch
+      );
       this.setData(next);
 
       history.add("photo", {
@@ -320,10 +398,15 @@ Page({
       clearTimeout(coldHintTimer);
       wx.hideLoading();
       const msg = toFriendly(e, "photo/translate");
+      const raw = (typeof e === "string" ? e : (e && (e.detail || e.message))) || "";
+      const isQuota = /次数已用完|每日|429/.test(String(raw));
       this.setData({
         loading: false,
         errorMsg: isFriendlyError(e) ? msg : "翻译失败：" + msg,
       });
+      if (isQuota) {
+        this._refreshQuota();
+      }
     }
   },
 
