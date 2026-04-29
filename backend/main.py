@@ -44,8 +44,13 @@ app = FastAPI(
 # 都设为 1，否则不同实例会各自计数导致超额。
 # 上线后接入数据库（云开发集合）即可分布式准确计数。
 # ============================================================
-REDRAW_DAILY_LIMIT = int(os.getenv("REDRAW_DAILY_LIMIT", "5"))
+REDRAW_DAILY_LIMIT = int(os.getenv("REDRAW_DAILY_LIMIT", "8"))
+# 分享解锁的额外额度（每次分享 +2，每天最多触发 N 次）
+REDRAW_BONUS_PER_SHARE = int(os.getenv("REDRAW_BONUS_PER_SHARE", "2"))
+REDRAW_BONUS_DAILY_MAX = int(os.getenv("REDRAW_BONUS_DAILY_MAX", "3"))  # 最多 3*2=6
 _REDRAW_QUOTA: dict[str, int] = {}
+_REDRAW_BONUS: dict[str, int] = {}        # openid:date → 已获得的奖励额度
+_REDRAW_BONUS_TIMES: dict[str, int] = {}  # openid:date → 今日触发奖励的次数
 
 
 def _wx_openid(request: Request) -> str:
@@ -59,8 +64,10 @@ def _quota_key(openid: str) -> str:
 
 
 def _redraw_remaining(openid: str) -> int:
-    used = _REDRAW_QUOTA.get(_quota_key(openid), 0)
-    return max(0, REDRAW_DAILY_LIMIT - used)
+    k = _quota_key(openid)
+    used = _REDRAW_QUOTA.get(k, 0)
+    bonus = _REDRAW_BONUS.get(k, 0)
+    return max(0, REDRAW_DAILY_LIMIT + bonus - used)
 
 
 def _redraw_consume(openid: str, art_style: str = "") -> int:
@@ -332,15 +339,58 @@ def health() -> dict[str, str]:
 
 @app.get("/photo/quota")
 def photo_quota(request: Request) -> JSONResponse:
-    """查询当前 openid 当日 AI 重绘剩余次数。"""
+    """查询当前 openid 当日 AI 重绘剩余次数 + 已解锁奖励额度。"""
     openid = _wx_openid(request)
+    k = _quota_key(openid)
     return JSONResponse({
         "ok": True,
         "redraw_remaining": _redraw_remaining(openid),
         "redraw_limit": REDRAW_DAILY_LIMIT,
+        "redraw_bonus": _REDRAW_BONUS.get(k, 0),
+        "bonus_times_used": _REDRAW_BONUS_TIMES.get(k, 0),
+        "bonus_times_max": REDRAW_BONUS_DAILY_MAX,
+        "bonus_per_share": REDRAW_BONUS_PER_SHARE,
         "art_styles": [
             {"key": k, "label": v["label"]} for k, v in ART_STYLES.items()
         ],
+    })
+
+
+@app.post("/photo/quota/share-bonus")
+async def claim_share_bonus(request: Request) -> JSONResponse:
+    """分享后由前端调用领取额外重绘次数。
+
+    每次分享 +REDRAW_BONUS_PER_SHARE 次，每日最多触发 REDRAW_BONUS_DAILY_MAX 次。
+    无法 100% 防作弊（前端自报），但作弊收益小（最多 6 次/天），ROI 不高。
+    """
+    openid = _wx_openid(request)
+    k = _quota_key(openid)
+    times_used = _REDRAW_BONUS_TIMES.get(k, 0)
+    if times_used >= REDRAW_BONUS_DAILY_MAX:
+        return JSONResponse({
+            "ok": False,
+            "error": f"今日分享奖励已达上限（{REDRAW_BONUS_DAILY_MAX} 次）",
+            "redraw_remaining": _redraw_remaining(openid),
+        }, status_code=429)
+
+    _REDRAW_BONUS_TIMES[k] = times_used + 1
+    _REDRAW_BONUS[k] = _REDRAW_BONUS.get(k, 0) + REDRAW_BONUS_PER_SHARE
+
+    short = (openid or "anon")[:8] + "***" if openid else "anon"
+    logger.info(
+        "[SHARE_BONUS] openid=%s +%d times=%d/%d new_remaining=%d",
+        short, REDRAW_BONUS_PER_SHARE,
+        _REDRAW_BONUS_TIMES[k], REDRAW_BONUS_DAILY_MAX,
+        _redraw_remaining(openid),
+    )
+    return JSONResponse({
+        "ok": True,
+        "added": REDRAW_BONUS_PER_SHARE,
+        "redraw_remaining": _redraw_remaining(openid),
+        "redraw_limit": REDRAW_DAILY_LIMIT,
+        "redraw_bonus": _REDRAW_BONUS[k],
+        "bonus_times_used": _REDRAW_BONUS_TIMES[k],
+        "bonus_times_max": REDRAW_BONUS_DAILY_MAX,
     })
 
 

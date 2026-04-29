@@ -1,4 +1,8 @@
-const { photoTranslateChunked, getPhotoQuota } = require("../../utils/api.js");
+const {
+  photoTranslateChunked,
+  getPhotoQuota,
+  claimShareBonus,
+} = require("../../utils/api.js");
 const history = require("../../utils/history.js");
 const { toFriendly, withRetry, isFriendlyError } = require("../../utils/errors.js");
 
@@ -8,6 +12,16 @@ const ART_STYLE_OPTIONS = [
   { key: "ink", label: "中国水墨", emoji: "🖌️" },
   { key: "pixel", label: "像素风", emoji: "👾" },
   { key: "lego", label: "乐高积木", emoji: "🧱" },
+];
+
+// 等待 AI 绘制时的趣味文案，每 4 秒切一句
+const REDRAW_WAITING_TIPS = [
+  "AI 正在调色…",
+  "AI 正在勾画毛绒线条…",
+  "AI 在拍立得里给毛孩子换装…",
+  "毛孩子说：再给它 5 秒…",
+  "马上好啦，再忍一下下…",
+  "AI 在加最后一笔光泽…",
 ];
 
 const ALLOWED_EXT = ["jpg", "jpeg", "png", "webp", "heic", "heif", "bmp", "gif"];
@@ -88,8 +102,9 @@ Page({
     mode: "origin",
     artStyle: "ghibli",
     artStyleOptions: ART_STYLE_OPTIONS,
-    redrawRemaining: 5,
-    redrawLimit: 5,
+    redrawRemaining: 8,
+    redrawLimit: 8,
+    redrawBonus: 0,
 
     historyOpen: false,
     historyList: [],
@@ -111,6 +126,9 @@ Page({
         if (typeof r.redraw_limit === "number") {
           next.redrawLimit = r.redraw_limit;
         }
+        if (typeof r.redraw_bonus === "number") {
+          next.redrawBonus = r.redraw_bonus;
+        }
         this.setData(next);
       })
       .catch((e) => {
@@ -131,6 +149,62 @@ Page({
     const k = e.currentTarget.dataset.key;
     if (!k || k === this.data.artStyle) return;
     this.setData({ artStyle: k });
+  },
+
+  _maybePromptShareBonus() {
+    const _self = this;
+    wx.showModal({
+      title: "想再画几张？",
+      content: "把海报分享给好友 / 朋友圈\n即可解锁 +2 次 AI 重绘机会（每天最多 +6）",
+      confirmText: "去分享",
+      cancelText: "下次",
+      confirmColor: "#FF6B6B",
+      success(r) {
+        if (r.confirm) {
+          // 调起分享菜单（用户必须主动点系统分享按钮才能真分享）
+          wx.showShareMenu({ withShareTicket: false });
+          wx.showToast({
+            title: "请点击右上角 ··· 选择分享",
+            icon: "none",
+            duration: 2200,
+          });
+          // 标记一下，等用户从分享回来时领取奖励
+          _self._pendingShareBonus = true;
+        }
+      },
+    });
+  },
+
+  onShareAppMessage() {
+    // 复用现有 onShareAppMessage（在下方），分享触发时尝试领奖
+    if (this._pendingShareBonus) {
+      this._pendingShareBonus = false;
+      claimShareBonus()
+        .then((r) => {
+          if (r && r.ok) {
+            this.setData({
+              redrawRemaining: r.redraw_remaining,
+              redrawLimit: r.redraw_limit,
+            });
+            wx.showToast({
+              title: `已 +${r.added} 次重绘机会！`,
+              icon: "success",
+              duration: 2200,
+            });
+          }
+        })
+        .catch((e) => {
+          console.warn("[bonus] 领取失败", e);
+        });
+    }
+    const txt = (this.data.quote || "").trim();
+    return {
+      title: txt
+        ? "我家毛孩子的趣味文案：" + txt.slice(0, 24)
+        : "喵汪心语 · 给毛孩子做一张趣味海报",
+      path: "/pages/index/index",
+      imageUrl: this.data.posterImageSrc || "/images/pet.png",
+    };
   },
 
   _buildHistory() {
@@ -176,17 +250,25 @@ Page({
     });
   },
 
-  onShareAppMessage() {
-    const txt = (this.data.quote || "").trim();
-    return {
-      title: txt
-        ? "我家毛孩子的趣味文案：" + txt.slice(0, 24)
-        : "喵汪心语 · 给毛孩子做一张趣味海报",
-      path: "/pages/index/index",
-      imageUrl: this.data.posterImageSrc || "/images/pet.png",
-    };
-  },
   onShareTimeline() {
+    if (this._pendingShareBonus) {
+      this._pendingShareBonus = false;
+      claimShareBonus()
+        .then((r) => {
+          if (r && r.ok) {
+            this.setData({
+              redrawRemaining: r.redraw_remaining,
+              redrawLimit: r.redraw_limit,
+            });
+            wx.showToast({
+              title: `已 +${r.added} 次重绘机会！`,
+              icon: "success",
+              duration: 2200,
+            });
+          }
+        })
+        .catch((e) => console.warn("[bonus] 领取失败", e));
+    }
     return {
       title: this.data.quote
         ? "我家毛孩子的趣味海报"
@@ -317,8 +399,9 @@ Page({
           (p) => {
             let title;
             if (p && p.phase === "redraw") {
-              // 异步轮询阶段（AI 重绘后台进行中）
-              title = `AI 绘制中 ${p.elapsed}s…`;
+              // 趣味文案 + 倒计时，让等待不那么煎熬
+              const tipIdx = Math.floor(p.elapsed / 4) % REDRAW_WAITING_TIPS.length;
+              title = `${REDRAW_WAITING_TIPS[tipIdx]} ${p.elapsed}s`;
             } else if (p && typeof p.done === "number") {
               const pct = Math.floor((p.done / p.total) * 100);
               if (pct < 100) {
@@ -348,6 +431,9 @@ Page({
       }
       if (typeof r.redraw_limit === "number") {
         quotaPatch.redrawLimit = r.redraw_limit;
+      }
+      if (typeof r.redraw_bonus === "number") {
+        quotaPatch.redrawBonus = r.redraw_bonus;
       }
 
       if (a.redraw_error) {
@@ -401,6 +487,11 @@ Page({
         posterImageSrc: next.posterImageSrc,
       });
       this.setData({ historyList: this._buildHistory() });
+
+      // 用了重绘 + 配额所剩不多时，温柔引导分享解锁
+      if (a.redraw_used && next.redrawRemaining <= 2) {
+        this._maybePromptShareBonus();
+      }
     } catch (e) {
       clearTimeout(coldHintTimer);
       wx.hideLoading();

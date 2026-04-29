@@ -102,6 +102,29 @@ function getPhotoQuota() {
   });
 }
 
+/** 分享后调用：兑换额外的 AI 重绘次数。 */
+function claimShareBonus() {
+  if (USE_CLOUD) {
+    return _callContainer("/photo/quota/share-bonus", { data: {} });
+  }
+  return new Promise((resolve, reject) => {
+    wx.request({
+      url: `${API_BASE}/photo/quota/share-bonus`,
+      method: "POST",
+      timeout: 10000,
+      success(res) {
+        const j = typeof res.data === "object" ? res.data : parseJsonSafe(res.data);
+        if (res.statusCode >= 400) {
+          reject(j.detail || j.error || res.data);
+          return;
+        }
+        resolve(j);
+      },
+      fail: reject,
+    });
+  });
+}
+
 // ========== /photo ==========
 
 /** options: { redraw?: boolean, artStyle?: string } */
@@ -382,4 +405,5 @@ module.exports = {
   voiceTranslateChunked,
   pingHealth,
   getPhotoQuota,
+  claimShareBonus,
 };

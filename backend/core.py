@@ -6,6 +6,8 @@ import random
 import base64
 import platform
 import warnings
+import logging
+import concurrent.futures
 from pathlib import Path
 from io import BytesIO
 from datetime import datetime
@@ -21,6 +23,8 @@ try:
     _HEIF_OK = True
 except Exception:
     _HEIF_OK = False
+
+logger = logging.getLogger("petwhisperer.core")
 
 # ================================================================
 #  基础配置
@@ -97,8 +101,20 @@ _PROMPT_TEMPLATE = r"""你是一位兼具动物行为学知识与视觉设计天
 ### 第三步 · 正能量约束
 严禁使用"瞎、残、死、丑、胖、病、蠢"等负面词。闭眼/眨眼 → "沉醉""不屑""被我迷倒了吧"等。
 
-### 第四步 · 禁止脑补
-只描述画面中实际可见的元素。严禁无中生有。
+### 第四步 · 禁止脑补 · 强制紧扣画面（重要）
+- 文案必须直接呼应画面中**真实可见**的元素：动作、表情、姿态、物品、场景。
+- 严禁产出与画面无关的"段子"（如"人类的脚臭""昨天发生了什么"等无依据脑补）。
+- 写完 quote_cn 后自检：如果**抹掉这张图，这句话还能套到任意一张猫狗照片上**，那就是失败的，请重写。
+- 优秀范例（紧扣动作）：
+  · 猫眯眼趴着 → "今天的太阳真不错"
+  · 狗抬头看主人 → "你手里那个，分我一口"
+  · 两只猫贴贴 → "别动，我在听你心跳"
+- 失败范例（脱离画面）：
+  · "人类的脚臭是种不祥之兆"（图里既没有人也没有脚）
+  · "昨天的小鱼干又香又脆"（图里没有小鱼干）
+
+### 第四点五步 · 风格基调
+偏向**治愈、温暖、呆萌、轻吐槽**，避免阴沉/恐怖/猎奇。
 
 ### 第五步 · 视觉风格
 - minimalism：干净简洁、亮色调
@@ -1892,19 +1908,33 @@ def run_photo_job(
     except OSError:
         pass
 
-    data = get_pet_insight(img)
-
     poster_src = img
     redraw_used = False
     redraw_error: str | None = None
+
     if redraw:
-        try:
-            poster_src = redraw_image(img, art_style=art_style)
-            redraw_used = True
-        except Exception as e:
-            # 失败时回退原图渲染：避免吃掉用户额度但啥都没看到
-            redraw_error = str(e)
-            poster_src = img
+        # === 并行：LLM 文案分析 + AI 重绘同时跑 ===
+        # 串行约 LLM 12s + 重绘 18s = 30s
+        # 并行 max(12s, 18s) ≈ 18-22s，砍掉 30%-40% 总耗时
+        # 两个调用都是 IO 密集（HTTP），GIL 不阻塞，纯收益
+        data: dict | None = None
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            f_data = ex.submit(get_pet_insight, img)
+            f_redrawn = ex.submit(redraw_image, img, art_style)
+            try:
+                data = f_data.result()
+            except Exception as e:
+                logger.exception("get_pet_insight failed in parallel")
+                data = dict(DEFAULT_RESULT)
+                data["_persona"] = ""
+            try:
+                poster_src = f_redrawn.result()
+                redraw_used = True
+            except Exception as e:
+                redraw_error = str(e)
+                poster_src = img
+    else:
+        data = get_pet_insight(img)
 
     poster = render_poster(poster_src, data)
     buf = BytesIO()

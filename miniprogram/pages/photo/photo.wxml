@@ -82,7 +82,9 @@
           >
             <view class="mode-pill-title">🎨 AI 重绘</view>
             <view class="mode-pill-sub">
-              <text wx:if="{{redrawLimit > 0}}">今日剩余 {{redrawRemaining}}/{{redrawLimit}}</text>
+              <text wx:if="{{redrawLimit > 0}}">
+                今日剩余 {{redrawRemaining}} 次<text wx:if="{{redrawBonus > 0}}">（含分享 +{{redrawBonus}}）</text>
+              </text>
               <text wx:else>风格化重绘</text>
             </view>
           </view>
