@@ -3,8 +3,8 @@
   <view class="gradient-header">
     <view class="gh-about" hover-class="gh-about-hover" bindtap="goAbout">关于</view>
     <view class="gh-logo">🐾</view>
-    <view class="gh-title">PetWhisperer</view>
-    <view class="gh-sub">读懂毛孩子的每一句话</view>
+    <view class="gh-title">喵汪心语</view>
+    <view class="gh-sub">和毛孩子的趣味日常 · 仅供娱乐</view>
   </view>
 
   <view class="cards">
@@ -13,8 +13,8 @@
         <image class="entry-icon-img" src="/images/pet.png" mode="aspectFit" />
       </view>
       <view class="entry-body">
-        <view class="entry-title">照片翻译</view>
-        <view class="entry-sub">上传照片 · 生成专属海报文案</view>
+        <view class="entry-title">趣味照片</view>
+        <view class="entry-sub">上传一张照片 · 生成趣味文案海报</view>
       </view>
       <view class="entry-arrow">›</view>
     </view>
@@ -24,8 +24,8 @@
         <image class="entry-icon-img" src="/images/cat.png" mode="aspectFit" />
       </view>
       <view class="entry-body">
-        <view class="entry-title">猫语翻译</view>
-        <view class="entry-sub">录音翻译 · 文字翻译 · 训练指南</view>
+        <view class="entry-title">猫咪互动</view>
+        <view class="entry-sub">趣味互动 · 训练小贴士</view>
       </view>
       <view class="entry-arrow">›</view>
     </view>
@@ -35,8 +35,8 @@
         <image class="entry-icon-img" src="/images/dog.png" mode="aspectFit" />
       </view>
       <view class="entry-body">
-        <view class="entry-title">狗语翻译</view>
-        <view class="entry-sub">录音翻译 · 文字翻译 · 训练指南</view>
+        <view class="entry-title">汪汪互动</view>
+        <view class="entry-sub">趣味互动 · 训练小贴士</view>
       </view>
       <view class="entry-arrow">›</view>
     </view>

@@ -12,17 +12,9 @@ Page({
       success: () => wx.showToast({ title: "已复制", icon: "success" }),
     });
   },
-  openPrivacy() {
-    if (wx.openPrivacyContract) {
-      wx.openPrivacyContract({
-        fail: () =>
-          wx.showToast({ title: "请稍后再试", icon: "none" }),
-      });
-    }
-  },
   onShareAppMessage() {
     return {
-      title: "PetWhisperer · 读懂毛孩子的每一句话",
+      title: "喵汪心语 · 和毛孩子的趣味日常",
       path: "/pages/index/index",
       imageUrl: "/images/pet.png",
     };

@@ -6,14 +6,14 @@ Page({
 
   onShareAppMessage() {
     return {
-      title: "PetWhisperer · 读懂毛孩子的每一句话",
+      title: "喵汪心语 · 和毛孩子的趣味日常",
       path: "/pages/index/index",
       imageUrl: "/images/pet.png",
     };
   },
   onShareTimeline() {
     return {
-      title: "PetWhisperer · 读懂毛孩子的每一句话",
+      title: "喵汪心语 · 和毛孩子的趣味日常",
       query: "",
       imageUrl: "/images/pet.png",
     };

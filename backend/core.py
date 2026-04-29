@@ -36,7 +36,9 @@ for _d in (UPLOAD_DIR, OUTPUT_DIR, ASSETS_DIR):
     _d.mkdir(exist_ok=True)
 
 API_BASE = "https://api.siliconflow.cn/v1"
-MODEL_ID = "Qwen/Qwen2.5-VL-72B-Instruct"
+# 注意：原来的 Qwen/Qwen2.5-VL-72B-Instruct 已于 2026-04-29 被硅基流动下线。
+# 替换为同生态的 Qwen3-VL-30B-A3B-Instruct（性价比最优，MoE，原生支持视觉+文本）。
+MODEL_ID = "Qwen/Qwen3-VL-30B-A3B-Instruct"
 MAX_RETRIES = 2
 
 VIBE_CN = {
@@ -397,16 +399,48 @@ def get_pet_insight(img: Image.Image) -> dict:
 # ================================================================
 
 def _watermark(poster: Image.Image) -> Image.Image:
+    """右下角加 AI 生成合规标识（醒目白色胶囊）。
+
+    符合《人工智能生成合成内容标识办法》（2025-09-01 起施行）的
+    "显著标识" 要求：明显的"AI 生成内容"字样 + 高对比配色。
+    """
     w, h = poster.size
+    poster = poster.convert("RGBA")
     ly = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(ly)
-    f = _font(_fs(16, w))
-    tag = "AI宠心译"
+
+    fs = max(_fs(20, w), 16)
+    f = _font(fs)
+    tag = "AI 生成内容"
     bb = d.textbbox((0, 0), tag, font=f)
-    d.text((w - (bb[2] - bb[0]) - _fs(18, w),
-            h - (bb[3] - bb[1]) - _fs(12, w)),
-           tag, fill=(180, 180, 180, 77), font=f)
-    return Image.alpha_composite(poster.convert("RGBA"), ly).convert("RGB")
+    tw = bb[2] - bb[0]
+    th = bb[3] - bb[1]
+    pad_x = _fs(18, w)
+    pad_y = _fs(10, w)
+    pill_w = tw + pad_x * 2
+    pill_h = th + pad_y * 2
+    radius = pill_h // 2
+
+    margin = _fs(22, w)
+    x = w - pill_w - margin
+    y = h - pill_h - margin
+
+    sh_off = _fs(4, w)
+    d.rounded_rectangle(
+        [x + sh_off, y + sh_off, x + pill_w + sh_off, y + pill_h + sh_off],
+        radius=radius, fill=(0, 0, 0, 70),
+    )
+    d.rounded_rectangle(
+        [x, y, x + pill_w, y + pill_h],
+        radius=radius, fill=(255, 255, 255, 240),
+        outline=(255, 107, 107, 220), width=max(2, _fs(2, w)),
+    )
+    d.text(
+        (x + pad_x - bb[0], y + pad_y - bb[1]), tag,
+        fill=(255, 107, 107, 255), font=f,
+    )
+
+    return Image.alpha_composite(poster, ly).convert("RGB")
 
 
 # ================================================================

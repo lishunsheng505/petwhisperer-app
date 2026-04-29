@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from core import resolve_voice, run_photo_job, run_voice_job
+from wx_security import ContentUnsafeError, check_image_safe, check_text_safe
 
 logger = logging.getLogger("petwhisperer")
 logging.basicConfig(level=logging.INFO)
@@ -282,6 +283,12 @@ async def photo_chunk(request: Request) -> JSONResponse:
     if not full:
         raise HTTPException(status_code=400, detail="组装后文件为空")
 
+    # 微信内容安全：图片同步检测（仅 < 1MB 的图）
+    try:
+        check_image_safe(full, filename=filename)
+    except ContentUnsafeError as e:
+        raise HTTPException(status_code=400, detail=e.message) from e
+
     try:
         analysis, poster_png = run_photo_job(full, filename)
     except HTTPException:
@@ -407,6 +414,14 @@ async def voice_chunk(request: Request) -> JSONResponse:
     else:
         text = None
 
+    # 微信内容安全：用户主动输入的文字（人话→宠物语）必须过滤
+    if text and mode in ("human_to_pet_fun", "human_to_pet_guide"):
+        try:
+            openid = request.headers.get("X-WX-OPENID", "")
+            check_text_safe(text, openid=openid)
+        except ContentUnsafeError as e:
+            raise HTTPException(status_code=400, detail=e.message) from e
+
     voice_id = resolve_voice(lang, voice_gender)
     try:
         result = run_voice_job(
@@ -441,6 +456,11 @@ async def photo_translate(request: Request) -> JSONResponse:
     """
     try:
         raw, filename = await _read_image_input(request)
+        # 微信内容安全：图片同步检测（仅 < 1MB 的图，超出依赖 LLM prompt 兜底）
+        try:
+            check_image_safe(raw, filename=filename)
+        except ContentUnsafeError as e:
+            raise HTTPException(status_code=400, detail=e.message) from e
         analysis, poster_png = run_photo_job(raw, filename)
     except HTTPException:
         raise
@@ -511,6 +531,15 @@ async def _voice_endpoint(pet: str, request: Request) -> JSONResponse:
             status_code=400,
             detail=f"mode 必须是 {allowed_modes} 之一（实际收到 {mode!r}）",
         )
+
+    # 微信内容安全：用户主动输入的文字（人话→宠物语）必须过滤
+    if text and mode in ("human_to_pet_fun", "human_to_pet_guide"):
+        try:
+            openid = request.headers.get("X-WX-OPENID", "")
+            check_text_safe(text, openid=openid)
+        except ContentUnsafeError as e:
+            raise HTTPException(status_code=400, detail=e.message) from e
+
     voice_id = resolve_voice(lang, voice_gender)
     try:
         result = run_voice_job(

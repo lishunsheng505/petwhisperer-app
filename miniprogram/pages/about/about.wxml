@@ -3,8 +3,8 @@
     <view class="about-logo">
       <image class="about-logo-img" src="/images/pet.png" mode="aspectFit" />
     </view>
-    <view class="about-name">PetWhisperer</view>
-    <view class="about-slogan">读懂毛孩子的每一句话</view>
+    <view class="about-name">喵汪心语</view>
+    <view class="about-slogan">和毛孩子的趣味日常</view>
     <view class="about-version">v{{version}}</view>
   </view>
 
@@ -12,42 +12,51 @@
     <view class="card">
       <view class="card-title">📖 这是什么</view>
       <view class="about-text">
-        PetWhisperer 是一款基于 AI 的趣味宠物翻译小程序：
-        把宠物的叫声 / 照片 / 想对宠物说的话翻译成轻松好玩的中文，
-        也能给出训练动作的「四步指南」。
+        喵汪心语是一款专为铲屎官打造的<text class="hl">萌宠趣味互动小工具</text>：
+        给毛孩子的照片配一句趣味文案、把它的叫声变成好玩的中文台词、
+        把你想对它说的话变成趣味互动语句，还会给出常见动作的训练小贴士。
+        让你和毛孩子的日常多一点乐趣。
       </view>
     </view>
 
     <view class="card">
       <view class="card-title">⚠️ 免责声明</view>
       <view class="about-text">
-        本应用所有翻译内容均由 AI 生成，<text class="hl">仅供娱乐</text>，
-        不代表宠物真实想法，也不构成任何医学、行为学或训练专业建议。
-        如发现宠物异常，请咨询执业兽医。
+        本小程序的所有解读、文案、训练建议均为<text class="hl">由 AI 算法生成的趣味娱乐内容</text>，
+        <text class="hl">不代表宠物真实想法</text>，
+        也不构成任何医学、行为学或训练方面的专业意见。
+        若毛孩子身体或行为出现异常，请第一时间咨询执业兽医。
+      </view>
+      <view class="about-text muted small">
+        依据《人工智能生成合成内容标识办法》（2025-09-01 起施行），
+        本小程序所有 AI 生成结果均带有显著标识。
       </view>
       <view class="about-text">
-        请勿上传他人受版权保护的图片或音频；上传内容仅用于本次翻译，不会保存。
+        请勿上传他人受版权保护的图片或音频；上传内容仅用于本次互动展示，
+        处理完即删除，不做其他用途。
       </view>
     </view>
 
     <view class="card">
       <view class="card-title">🔐 隐私</view>
       <view class="about-text">
-        我们仅在你主动操作时收集照片 / 录音 / 文本用于翻译，
-        翻译完成后即删除，不做其他用途。
+        我们仅在你主动操作时收集照片 / 录音 / 文本用于本次互动，
+        服务端处理完成后立即删除，不留存、不用于训练、不分享给第三方。
       </view>
-      <view class="about-link" bindtap="openPrivacy">查看《用户隐私保护指引》›</view>
+      <view class="about-text muted small">
+        完整《用户隐私保护指引》会在你首次使用相关功能时弹出，可随时撤回。
+      </view>
     </view>
 
     <view class="card">
       <view class="card-title">📮 反馈</view>
       <view
         class="about-row"
-        data-value="petwhisperer@example.com"
+        data-value="1987848568@qq.com"
         bindtap="copyContact"
       >
         <view class="about-row-k">邮箱</view>
-        <view class="about-row-v">petwhisperer@example.com</view>
+        <view class="about-row-v">1987848568@qq.com</view>
         <view class="about-row-arrow">复制</view>
       </view>
       <view class="about-text muted small">

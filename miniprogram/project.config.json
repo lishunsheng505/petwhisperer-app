@@ -1,8 +1,8 @@
 {
   "miniprogramRoot": "./",
   "compileType": "miniprogram",
-  "projectname": "PetWhisperer",
-  "description": "宠物翻译官",
+  "projectname": "miaotuantuan",
+  "description": "喵汪心语 - 萌宠趣味互动",
   "appid": "wxa51288cfc6bce986",
   "setting": {
     "urlCheck": false,
@@ -16,7 +16,25 @@
       "ignore": [],
       "disablePlugins": [],
       "outputPath": ""
-    }
+    },
+    "compileWorklet": false,
+    "uglifyFileName": false,
+    "uploadWithSourceMap": true,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "minifyWXSS": true,
+    "minifyWXML": true,
+    "localPlugins": false,
+    "disableUseStrict": false,
+    "condition": false,
+    "swc": false,
+    "disableSWC": true
   },
-  "libVersion": "2.32.3"
+  "libVersion": "2.32.3",
+  "simulatorPluginLibVersion": {},
+  "packOptions": {
+    "ignore": [],
+    "include": []
+  },
+  "editorSetting": {}
 }

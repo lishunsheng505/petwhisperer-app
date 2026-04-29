@@ -2,7 +2,7 @@ const { voiceTranslate, voiceTranslateChunked } = require("./api.js");
 const recorder = require("./recorder.js");
 const { createPlayer } = require("./player.js");
 const history = require("./history.js");
-const { toFriendly, withRetry } = require("./errors.js");
+const { toFriendly, withRetry, isFriendlyError } = require("./errors.js");
 
 const LANG_LIST = [
   { value: "zh", label: "中文" },
@@ -166,15 +166,15 @@ function createVoicePage(pet) {
       const tx = (r.translation || "").trim();
       return {
         title: tx
-          ? "AI 翻译我家" + this.data.petName + "说的话：" + tx.slice(0, 24)
-          : "PetWhisperer · " + this.data.petName + "语翻译",
+          ? "我家" + this.data.petName + "今天想说：" + tx.slice(0, 24)
+          : "喵汪心语 · 和" + this.data.petName + "的趣味互动",
         path: "/pages/index/index",
         imageUrl: isCat ? "/images/cat.png" : "/images/dog.png",
       };
     },
     onShareTimeline() {
       return {
-        title: "PetWhisperer · " + (isCat ? "猫" : "狗") + "语翻译",
+        title: "喵汪心语 · 和" + (isCat ? "猫咪" : "狗狗") + "的趣味互动",
         query: "",
         imageUrl: isCat ? "/images/cat.png" : "/images/dog.png",
       };
@@ -354,7 +354,7 @@ function createVoicePage(pet) {
             ({ done, total }) => {
               const pct = Math.floor((done / total) * 100);
               wx.showLoading({
-                title: pct < 100 ? `上传中 ${pct}%` : "AI 翻译中…",
+                title: pct < 100 ? `上传中 ${pct}%` : "解读中…",
                 mask: true,
               });
             }
@@ -382,9 +382,10 @@ function createVoicePage(pet) {
       } catch (e) {
         clearTimeout(coldHintTimer);
         wx.hideLoading();
+        const msg = toFriendly(e, pet + "/audio");
         this.setData({
           loading: false,
-          errorMsg: "翻译失败：" + toFriendly(e, pet + "/audio"),
+          errorMsg: isFriendlyError(e) ? msg : "翻译失败：" + msg,
         });
       }
     },
@@ -460,9 +461,10 @@ function createVoicePage(pet) {
       } catch (e) {
         clearTimeout(coldHintTimer);
         wx.hideLoading();
+        const msg = toFriendly(e, pet + "/text");
         this.setData({
           loading: false,
-          errorMsg: "翻译失败：" + toFriendly(e, pet + "/text"),
+          errorMsg: isFriendlyError(e) ? msg : "翻译失败：" + msg,
         });
       }
     },

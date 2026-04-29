@@ -1,6 +1,6 @@
 const { photoTranslateChunked } = require("../../utils/api.js");
 const history = require("../../utils/history.js");
-const { toFriendly, withRetry } = require("../../utils/errors.js");
+const { toFriendly, withRetry, isFriendlyError } = require("../../utils/errors.js");
 
 const ALLOWED_EXT = ["jpg", "jpeg", "png", "webp", "heic", "heif", "bmp", "gif"];
 const PREVIEWABLE = ["jpg", "jpeg", "png", "webp", "bmp", "gif"];
@@ -132,8 +132,8 @@ Page({
     const txt = (this.data.quote || "").trim();
     return {
       title: txt
-        ? "AI 替我家毛孩子代言：" + txt.slice(0, 24)
-        : "PetWhisperer · 给你的毛孩子写一句海报文案",
+        ? "我家毛孩子的趣味文案：" + txt.slice(0, 24)
+        : "喵汪心语 · 给毛孩子做一张趣味海报",
       path: "/pages/index/index",
       imageUrl: this.data.posterImageSrc || "/images/pet.png",
     };
@@ -141,8 +141,8 @@ Page({
   onShareTimeline() {
     return {
       title: this.data.quote
-        ? "AI 给我家毛孩子写的海报文案"
-        : "PetWhisperer · 萌宠海报生成器",
+        ? "我家毛孩子的趣味海报"
+        : "喵汪心语 · 萌宠趣味海报",
       query: "",
       imageUrl: this.data.posterImageSrc || "/images/pet.png",
     };
@@ -265,7 +265,7 @@ Page({
         photoTranslateChunked(finalPath, ({ done, total }) => {
           const pct = Math.floor((done / total) * 100);
           wx.showLoading({
-            title: pct < 100 ? `上传中 ${pct}%` : "AI 分析中…",
+            title: pct < 100 ? `上传中 ${pct}%` : "生成中…",
             mask: true,
           });
         })
@@ -319,9 +319,10 @@ Page({
     } catch (e) {
       clearTimeout(coldHintTimer);
       wx.hideLoading();
+      const msg = toFriendly(e, "photo/translate");
       this.setData({
         loading: false,
-        errorMsg: "翻译失败：" + toFriendly(e, "photo/translate"),
+        errorMsg: isFriendlyError(e) ? msg : "翻译失败：" + msg,
       });
     }
   },

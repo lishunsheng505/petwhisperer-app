@@ -4,8 +4,8 @@
     <view class="gh-logo-wrap">
       <image class="gh-logo-img" src="/images/pet.png" mode="aspectFit" />
     </view>
-    <view class="gh-title">照片翻译</view>
-    <view class="gh-sub">上传一张毛孩子的照片 · 生成专属海报文案</view>
+    <view class="gh-title">趣味照片</view>
+    <view class="gh-sub">上传一张毛孩子的照片 · 生成趣味文案海报</view>
   </view>
 
   <view class="section">
@@ -72,14 +72,14 @@
         loading="{{loading}}"
         disabled="{{loading || !fileName}}"
       >
-        ✨ 开始翻译
+        ✨ 生成趣味文案
       </button>
     </view>
 
     <!-- Result card -->
     <block wx:if="{{quote || vibeLabel || persona}}">
       <view class="card result-card">
-        <view class="card-title">💬 AI 文案</view>
+        <view class="card-title">💬 趣味文案</view>
         <view class="quote-cn">{{quote}}</view>
         <view wx:if="{{vibe}}" class="quote-en">"{{vibe}}"</view>
         <view class="result-tags">
@@ -88,7 +88,7 @@
           <view wx:for="{{pets}}" wx:key="*this" class="tag outline">🐾 {{item}}</view>
         </view>
         <view class="disclaimer-block">
-          <view class="disclaimer">⚠️ 仅供娱乐，请勿当真</view>
+          <view class="disclaimer">✨ AI 生成内容 · 仅供娱乐，请勿当真</view>
         </view>
       </view>
     </block>

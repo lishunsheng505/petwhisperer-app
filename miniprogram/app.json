@@ -10,7 +10,7 @@
     "backgroundTextStyle": "light",
     "backgroundColor": "#FFFAF5",
     "navigationBarBackgroundColor": "#FF6B6B",
-    "navigationBarTitleText": "PetWhisperer",
+    "navigationBarTitleText": "喵汪心语",
     "navigationBarTextStyle": "white"
   },
   "tabBar": {

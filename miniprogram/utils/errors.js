@@ -55,6 +55,29 @@ function toFriendly(e, ctx) {
   return raw;
 }
 
+/**
+ * 判断错误信息是否已经是"用户友好的中文提示"，
+ * 是 → 调用方应直接展示而不要再加"翻译失败/上传失败"等前缀。
+ * 例如后端返回的 "文字内容含有敏感信息，请换种说法再试 🙏"
+ */
+function isFriendlyError(e) {
+  const raw = _rawMsg(e) || "";
+  if (!raw) return false;
+  if (raw.length > 60) return false;
+  // 不能含英文报错关键字（说明是底层错误，要前缀提示用户）
+  const lower = raw.toLowerCase();
+  const isLowLevel =
+    lower.indexOf("fail") >= 0 ||
+    lower.indexOf("error") >= 0 ||
+    lower.indexOf("request") >= 0 ||
+    lower.indexOf("network") >= 0 ||
+    lower.indexOf("timeout") >= 0 ||
+    lower.indexOf("statuscode") >= 0;
+  if (isLowLevel) return false;
+  // 已经是友好的中文提示
+  return /[请试改换重新|敏感|违规|过大|过长|稍后]/.test(raw);
+}
+
 function _rawMsg(e) {
   if (!e) return "";
   if (typeof e === "string") return e;
@@ -90,4 +113,4 @@ async function withRetry(fn, ms = 1500) {
   }
 }
 
-module.exports = { toFriendly, withRetry };
+module.exports = { toFriendly, withRetry, isFriendlyError };
