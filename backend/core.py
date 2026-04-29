@@ -304,9 +304,22 @@ def crop_watermark(img: Image.Image) -> Image.Image:
     return img.crop((0, 0, w, int(h * 0.9)))
 
 
-def image_to_base64(img: Image.Image) -> str:
+def image_to_base64(img: Image.Image, max_side: int = 768) -> str:
+    """把图片编 base64，默认缩到长边 768 — 给 LLM 看够用且 token 省 70%。
+
+    Args:
+        img: 原图
+        max_side: 长边像素上限。768 在 LLM 视觉理解保留度 + 推理速度上最划算。
+                  传 None 或 0 表示不缩。
+    """
+    if max_side and max_side > 0:
+        w, h = img.size
+        if max(w, h) > max_side:
+            scale = max_side / max(w, h)
+            img = img.resize(
+                (int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
     buf = BytesIO()
-    img.save(buf, format="JPEG", quality=92)
+    img.save(buf, format="JPEG", quality=88)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
