@@ -12,6 +12,11 @@ const ART_STYLE_OPTIONS = [
   { key: "ink", label: "中国水墨", emoji: "🖌️" },
   { key: "pixel", label: "像素风", emoji: "👾" },
   { key: "lego", label: "乐高积木", emoji: "🧱" },
+  { key: "watercolor", label: "水彩淡彩", emoji: "🎨" },
+  { key: "crayon", label: "蜡笔童画", emoji: "🖍️" },
+  { key: "cyberpunk", label: "霓虹朋克", emoji: "🌃" },
+  { key: "ukiyo", label: "浮世绘", emoji: "🌊" },
+  { key: "vapor", label: "蒸汽波80s", emoji: "🌅" },
 ];
 
 // 等待 AI 绘制时的趣味文案，每 4 秒切一句

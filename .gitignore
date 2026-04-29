@@ -39,3 +39,6 @@ backend/outputs/*
 backend.zip
 backend-slim.zip
 _zip_tmp/
+
+# 字体备份（24MB+16MB 没必要进仓库）
+backend/font_old.ttf

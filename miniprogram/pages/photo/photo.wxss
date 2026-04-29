@@ -197,11 +197,11 @@
 }
 
 .style-chip {
-  flex: 0 0 calc((100% - 24rpx) / 3);
-  padding: 16rpx 8rpx;
+  flex: 0 0 calc((100% - 48rpx) / 5);
+  padding: 12rpx 4rpx;
   background: #fff;
   border: 2rpx solid #FFE2C8;
-  border-radius: 16rpx;
+  border-radius: 14rpx;
   text-align: center;
   transition: all 0.16s ease;
 }
@@ -213,15 +213,16 @@
 }
 
 .style-chip-emoji {
-  font-size: 36rpx;
+  font-size: 32rpx;
   line-height: 1.2;
 }
 
 .style-chip-label {
-  font-size: 22rpx;
+  font-size: 18rpx;
   color: var(--text);
   font-weight: 600;
-  margin-top: 4rpx;
+  margin-top: 2rpx;
+  white-space: nowrap;
 }
 
 .style-chip.active .style-chip-label {

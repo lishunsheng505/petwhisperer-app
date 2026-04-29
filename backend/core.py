@@ -482,6 +482,58 @@ ART_STYLES: dict[str, dict] = {
             "No humans, no text in the image."
         ),
     },
+    "watercolor": {
+        "label": "水彩淡彩",
+        "prompt": (
+            "Redraw this pet portrait as soft watercolor painting on textured paper. "
+            "Translucent layered washes, gentle pastel palette, visible paper grain, "
+            "loose flowing brushstrokes, dreamy quiet atmosphere. "
+            "IMPORTANT: preserve the pet's species, breed, fur color and pose. "
+            "No humans, no text in the image."
+        ),
+    },
+    "crayon": {
+        "label": "蜡笔儿童画",
+        "prompt": (
+            "Redraw this pet as a children's crayon drawing on white paper. "
+            "Bold colorful crayon strokes, simple cute shapes, naive playful style, "
+            "thick outlines, unfilled white areas, like a kid's art class work. "
+            "IMPORTANT: preserve the pet's species and main color. "
+            "No humans, no text in the image."
+        ),
+    },
+    "cyberpunk": {
+        "label": "赛博朋克霓虹",
+        "prompt": (
+            "Redraw this pet portrait in cyberpunk neon style. "
+            "Saturated magenta and cyan neon glow, rim lighting, futuristic city background "
+            "with bokeh lights, slight rain reflections, high contrast, "
+            "Blade Runner aesthetic. "
+            "IMPORTANT: preserve the pet's species, breed, fur pattern and pose. "
+            "No humans, no text in the image."
+        ),
+    },
+    "ukiyo": {
+        "label": "日式浮世绘",
+        "prompt": (
+            "Redraw this pet in traditional Japanese ukiyo-e woodblock print style "
+            "(in the manner of Hokusai or Hiroshige). "
+            "Flat color planes, bold outlines, traditional motifs (waves, clouds, cherry blossoms) "
+            "in the background, washi paper texture, muted natural palette. "
+            "IMPORTANT: preserve the pet's species, silhouette and gesture. "
+            "No humans, no text in the image."
+        ),
+    },
+    "vapor": {
+        "label": "蒸汽波80s",
+        "prompt": (
+            "Redraw this pet in 1980s vaporwave aesthetic. "
+            "Pink and cyan gradient sky, glowing sun with horizontal lines, retro grid floor, "
+            "palm tree silhouettes, chrome highlights, lo-fi VHS feel. "
+            "IMPORTANT: preserve the pet's species, breed and color, place it as the focal subject. "
+            "No humans, no text in the image."
+        ),
+    },
 }
 
 DEFAULT_ART_STYLE = "ghibli"
@@ -735,17 +787,20 @@ def _kawaii_bubble_bbox(
 #    └──────────────────────────────────────────┘
 # ================================================================
 
-# ---- v2 调色板（米色信纸系） --------------------------------
-_PV2 = {
+# ---- v3 调色板（米色信纸系，title/accent/tag 等支持候选池随机） ---
+_PV3 = {
     "bg": (251, 246, 238),
     "bg_line": (180, 160, 130, 22),
-    "title": (61, 46, 31),
+    "title_pool": [(61, 46, 31), (90, 60, 35), (120, 70, 30)],
     "subtitle": (139, 115, 85),
-    "accent": (201, 91, 0),
-    "tag_bg": (255, 244, 230),
+    "accent_pool": [(201, 91, 0), (220, 110, 40), (175, 80, 30)],
     "tag_fg": (201, 91, 0),
-    "tape_a": (255, 200, 180, 200),
-    "tape_b": (220, 200, 170, 200),
+    "tape_pool": [
+        (255, 200, 180, 200),
+        (220, 200, 170, 200),
+        (255, 220, 195, 200),
+        (235, 215, 180, 200),
+    ],
     "card": (255, 255, 255),
     "shadow": (60, 40, 20, 110),
 }
@@ -754,33 +809,57 @@ _PV2 = {
 _VIBE_THEMES = {
     "moody": {
         "bg": (240, 234, 225),
-        "title": (35, 30, 28),
-        "accent": (90, 60, 50),
-        "tape_a": (180, 175, 165, 200),
-        "tape_b": (160, 155, 150, 200),
-        "tag_bg": (235, 230, 222),
+        "title_pool": [(35, 30, 28), (52, 42, 38), (70, 50, 45)],
+        "accent_pool": [(90, 60, 50), (110, 75, 60), (75, 55, 45)],
+        "tape_pool": [
+            (180, 175, 165, 200),
+            (160, 155, 150, 200),
+            (200, 190, 175, 200),
+        ],
         "tag_fg": (90, 60, 50),
     },
     "retro": {
         "bg": (245, 232, 210),
-        "title": (90, 50, 20),
-        "accent": (175, 80, 30),
-        "tape_a": (220, 175, 130, 210),
-        "tape_b": (190, 145, 100, 210),
-        "tag_bg": (250, 232, 210),
+        "title_pool": [(90, 50, 20), (115, 60, 25), (140, 70, 25)],
+        "accent_pool": [(175, 80, 30), (200, 95, 40), (150, 70, 25)],
+        "tape_pool": [
+            (220, 175, 130, 210),
+            (190, 145, 100, 210),
+            (240, 195, 145, 210),
+        ],
         "tag_fg": (140, 70, 25),
     },
     "kawaii": {
         "bg": (253, 245, 247),
-        "title": (188, 70, 110),
-        "accent": (228, 95, 130),
-        "tape_a": (255, 195, 215, 210),
-        "tape_b": (255, 220, 200, 210),
-        "tag_bg": (255, 235, 240),
+        "title_pool": [(188, 70, 110), (215, 90, 130), (165, 60, 130)],
+        "accent_pool": [(228, 95, 130), (245, 130, 155), (210, 75, 110)],
+        "tape_pool": [
+            (255, 195, 215, 210),
+            (255, 220, 200, 210),
+            (255, 200, 230, 210),
+        ],
         "tag_fg": (200, 70, 110),
     },
-    "minimalism": {},  # 用默认
+    "minimalism": {},
 }
+
+# ---- 文案随机池（每张海报每个位置都不一样，制造新鲜感） ------
+_SIGN_TEMPLATES = [
+    "{date} · 拍立得日记",
+    "{date}  by 一只小傻瓜",
+    "{date} · 今日份可爱",
+    "shot on {date}",
+    "{date} · 主子的日常",
+    "{date} · 一日一拍",
+]
+
+_SUBTITLE_PREFIX = [
+    "by", "shot by", "from", "© by",
+]
+
+_SUBTITLE_SUFFIX = [
+    "的镜头", "的随手拍", "·  毛孩子日记", "·  iPhone",
+]
 
 
 def _hex_to_rgb(s: str) -> tuple[int, int, int]:
@@ -796,8 +875,18 @@ def _hex_to_rgb(s: str) -> tuple[int, int, int]:
 
 
 def _theme_for(vibe: str) -> dict:
-    base = dict(_PV2)
+    """合并默认主题 + vibe 微调，并把 *_pool 收敛成随机抽中的单值。
+
+    每次调用都重抽，所以同一只宠物连拍 3 次海报，标题色/胶带色/重音色都会变。
+    """
+    base = dict(_PV3)
     base.update(_VIBE_THEMES.get(vibe, {}))
+
+    base["title"] = random.choice(base.get("title_pool") or [(60, 60, 60)])
+    base["accent"] = random.choice(base.get("accent_pool") or [(200, 100, 50)])
+    pool = base.get("tape_pool") or [(255, 200, 180, 200)]
+    base["tape_a"] = random.choice(pool)
+    base["tape_b"] = random.choice([t for t in pool if t != base["tape_a"]] or pool)
     return base
 
 
@@ -859,8 +948,9 @@ def _build_photo_block(
     card.paste(photo_fit, (PAD_SIDE, PAD_TOP))
 
     d = ImageDraw.Draw(card)
-    f_sig = _font(28)
-    sig = datetime.now().strftime("%m.%d") + " · 拍立得日记"
+    f_sig = _font(34)
+    today = datetime.now().strftime("%m.%d")
+    sig = random.choice(_SIGN_TEMPLATES).format(date=today)
     bb = d.textbbox((0, 0), sig, font=f_sig)
     sx = (frame_w - (bb[2] - bb[0])) // 2
     sy = frame_h - PAD_BOT + (PAD_BOT - (bb[3] - bb[1])) // 2 - 8
@@ -901,21 +991,32 @@ def _wrap_cn(text: str, font: ImageFont.FreeTypeFont, max_w: int,
 
 def _draw_title(canvas: Image.Image, text: str, W: int, y: int,
                 theme: dict) -> int:
-    """大字标题（自动字号 + 居中 + 微阴影）。返回末尾 y。"""
+    """超大字标题（自动字号 + 居中 + 微阴影 + 随机装饰符号）。返回末尾 y。
+
+    v3 字号大幅放大（≤8 字 110px），强化主视觉，
+    第一行带随机左右小符号 ❀✦☘♡ 增加新鲜感。
+    """
     d = ImageDraw.Draw(canvas)
-    if len(text) <= 12:
-        fs = 72
-    elif len(text) <= 18:
-        fs = 60
-    elif len(text) <= 26:
-        fs = 50
+    if len(text) <= 8:
+        fs = 108
+    elif len(text) <= 11:
+        fs = 88
+    elif len(text) <= 14:
+        fs = 76
+    elif len(text) <= 20:
+        fs = 64
     else:
-        fs = 44
+        fs = 52
     f = _font(fs)
-    max_w = W - 120
+    max_w = W - 70
     lines = _wrap_cn(text, f, max_w, d)[:3]
-    line_h = int(fs * 1.32)
+    if len(lines) >= 2 and len(lines[-1]) <= 2 and len(lines[-2]) >= 5:
+        carry = lines[-2][-2:]
+        lines[-2] = lines[-2][:-2]
+        lines[-1] = carry + lines[-1]
+    line_h = int(fs * 1.28)
     cur_y = y
+
     for line in lines:
         bb = d.textbbox((0, 0), line, font=f)
         tw = bb[2] - bb[0]
@@ -931,17 +1032,17 @@ def _draw_title(canvas: Image.Image, text: str, W: int, y: int,
 def _draw_subtitle(canvas: Image.Image, text: str, W: int, y: int,
                    theme: dict) -> int:
     d = ImageDraw.Draw(canvas)
-    f = _font(26)
+    f = _font(32)
     bb = d.textbbox((0, 0), text, font=f)
     tx = (W - (bb[2] - bb[0])) // 2
     d.text((tx - bb[0], y - bb[1]), text, fill=theme["subtitle"], font=f)
 
-    line_y = y + (bb[3] - bb[1]) + 18
-    line_w = 80
+    line_y = y + (bb[3] - bb[1]) + 22
+    line_w = 96
     d.rounded_rectangle(
-        [(W - line_w) // 2, line_y, (W + line_w) // 2, line_y + 4],
-        radius=2, fill=theme["accent"])
-    return line_y + 14
+        [(W - line_w) // 2, line_y, (W + line_w) // 2, line_y + 5],
+        radius=3, fill=theme["accent"])
+    return line_y + 18
 
 
 def _make_tags(data: dict) -> list[str]:
@@ -966,26 +1067,23 @@ def _make_tags(data: dict) -> list[str]:
 
 def _draw_tags(canvas: Image.Image, tags: list[str], W: int, y: int,
                theme: dict) -> int:
+    """无框纯文字标签（更"日记本"感，告别陈旧 chip 设计）。"""
     d = ImageDraw.Draw(canvas)
-    f = _font(24)
-    pad_x, pad_y, gap = 22, 11, 14
+    f = _font(30)
+    gap = 28
 
     sizes = [d.textbbox((0, 0), t, font=f) for t in tags]
     widths = [(b[2] - b[0]) for b in sizes]
     heights = [(b[3] - b[1]) for b in sizes]
-    h = max(heights) + pad_y * 2
-    radius = h // 2
+    h = max(heights)
 
-    total_w = sum(w + pad_x * 2 for w in widths) + gap * (len(tags) - 1)
+    total_w = sum(widths) + gap * (len(tags) - 1)
     cur_x = (W - total_w) // 2
 
     for tag, bb, tw in zip(tags, sizes, widths):
-        bw = tw + pad_x * 2
-        d.rounded_rectangle([cur_x, y, cur_x + bw, y + h],
-                            radius=radius, fill=theme["tag_bg"])
-        d.text((cur_x + pad_x - bb[0], y + pad_y - bb[1]), tag,
+        d.text((cur_x - bb[0], y - bb[1]), tag,
                fill=theme["tag_fg"], font=f)
-        cur_x += bw + gap
+        cur_x += tw + gap
     return y + h
 
 
@@ -1026,24 +1124,59 @@ def _draw_palette_strip(canvas: Image.Image, palette: list[str], W: int,
     return y + block_h + 44
 
 
+def _draw_heart(d: ImageDraw.ImageDraw, cx: int, cy: int, size: int,
+                fill: tuple) -> None:
+    """手绘风小爱心。size 是大致总宽。"""
+    r = size // 2
+    d.ellipse([cx - size // 2, cy - r // 2, cx, cy + r // 2], fill=fill)
+    d.ellipse([cx, cy - r // 2, cx + size // 2, cy + r // 2], fill=fill)
+    d.polygon([
+        (cx - size // 2 + 2, cy + r // 4),
+        (cx + size // 2 - 2, cy + r // 4),
+        (cx, cy + size // 1.4),
+    ], fill=fill)
+
+
+def _draw_sparkle(d: ImageDraw.ImageDraw, cx: int, cy: int, size: int,
+                  fill: tuple) -> None:
+    """四角星 ✦"""
+    s = size
+    d.polygon([(cx, cy - s), (cx + s // 3, cy), (cx, cy + s),
+               (cx - s // 3, cy)], fill=fill)
+    d.polygon([(cx - s, cy), (cx, cy - s // 3), (cx + s, cy),
+               (cx, cy + s // 3)], fill=fill)
+
+
 def _draw_corner_doodles(canvas: Image.Image, W: int, H: int,
                          theme: dict) -> None:
-    """左下三角 + 右上小圆点矩阵（极简几何装饰）。"""
+    """随机化的角落手绘装饰（爱心 / 四角星 / 三角符号），每张都不一样。"""
     d = ImageDraw.Draw(canvas)
-    pts = [(58, H - 96), (94, H - 60), (58, H - 60)]
-    d.polygon(pts, fill=theme["accent"])
+    accent = theme["accent"][:3] if len(theme["accent"]) > 3 else theme["accent"]
+    soft = tuple(min(255, int(c * 0.7 + 60)) for c in accent)
 
-    cx, cy = W - 76, 178
-    for i in range(3):
-        for j in range(3):
-            r = 4
-            x = cx - i * 18
-            y = cy + j * 18
-            d.ellipse([x - r, y - r, x + r, y + r], fill=theme["subtitle"])
+    style = random.choice(["heart_left", "spark_right", "mixed"])
+
+    if style in ("heart_left", "mixed"):
+        _draw_heart(d, 80, H - 90, 38, accent)
+        _draw_heart(d, 122, H - 110, 22, soft)
+
+    if style in ("spark_right", "mixed"):
+        _draw_sparkle(d, W - 92, 170, 18, accent)
+        _draw_sparkle(d, W - 130, 210, 12, soft)
+        _draw_sparkle(d, W - 70, 220, 10, soft)
 
 
 def render_poster(img: Image.Image, data: dict) -> Image.Image:
-    """统一拍立得手账风海报（v2）。
+    """拍立得手账风海报 v3（2026-04-29 升级）。
+
+    主要变化（vs v2）：
+    - 删除色卡条（过时的"配色 App"风格）
+    - 标题字号 +50%（72 → 110），主视觉强化
+    - 拍立得画幅 +5%、倾斜角度随机化
+    - 角落装饰从 9 点矩阵 → 手绘小爱心 / ✦
+    - 标签 chip 去框，纯文字（更"日记本"感）
+    - 主题色 / 胶带色 / 签名文案 / 标题装饰符号全随机化，
+      同一只宠物连拍 N 次也不会重样
 
     Args:
         img: 用户原图（PIL Image，已读取并去 EXIF 旋转）
@@ -1069,15 +1202,15 @@ def render_poster(img: Image.Image, data: dict) -> Image.Image:
 
     _draw_washi_tapes(canvas, W, H, theme)
 
-    tilt = -1.6 if style != "retro" else -2.6
+    tilt = random.uniform(-2.8, 1.5)
     photo_block = _build_photo_block(
-        photo, frame_w=900, frame_h=720, tilt=tilt, theme=theme)
+        photo, frame_w=940, frame_h=760, tilt=tilt, theme=theme)
     pbx = (W - photo_block.width) // 2
-    pby = 110
+    pby = 100
     canvas.alpha_composite(photo_block, dest=(pbx, pby))
 
     title = (data.get("quote_cn") or "今天也是被治愈的一天").strip()
-    next_y = pby + photo_block.height - 40
+    next_y = pby + photo_block.height - 28
     next_y = _draw_title(canvas, title, W, next_y, theme)
 
     pets = data.get("pets") or []
@@ -1088,17 +1221,19 @@ def render_poster(img: Image.Image, data: dict) -> Image.Image:
         if t and t not in seen:
             seen.add(t)
             pet_types.append(t)
+
+    today = datetime.now().strftime("%m.%d")
     if pet_types:
-        subtitle = "By " + " × ".join(pet_types) + " · " + datetime.now().strftime("%m.%d")
+        prefix = random.choice(_SUBTITLE_PREFIX)
+        suffix = random.choice(_SUBTITLE_SUFFIX)
+        subtitle = f"{prefix} {' × '.join(pet_types)}{suffix} · {today}"
     else:
-        subtitle = "AI 萌宠心语 · " + datetime.now().strftime("%Y.%m.%d")
-    next_y = _draw_subtitle(canvas, subtitle, W, next_y + 16, theme)
+        prefix = random.choice(_SUBTITLE_PREFIX)
+        subtitle = f"{prefix} AI 萌宠心语 · {today}"
+    next_y = _draw_subtitle(canvas, subtitle, W, next_y + 18, theme)
 
     tags = _make_tags(data)
-    next_y = _draw_tags(canvas, tags, W, next_y + 24, theme)
-
-    palette = data.get("palette") or ["#FBF6EE", "#A0937D", "#3D2E1F"]
-    _draw_palette_strip(canvas, palette, W, next_y + 28, theme)
+    _draw_tags(canvas, tags, W, next_y + 36, theme)
 
     _draw_corner_doodles(canvas, W, H, theme)
 
