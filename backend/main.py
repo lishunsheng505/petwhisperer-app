@@ -9,8 +9,10 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import threading
 import time
 import traceback
+import uuid
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -76,6 +78,61 @@ def _redraw_consume(openid: str, art_style: str = "") -> int:
         short, art_style or "?", used, REDRAW_DAILY_LIMIT, remaining,
     )
     return remaining
+
+
+# ============================================================
+# AI 重绘异步任务队列
+# ------------------------------------------------------------
+# 微信 callContainer 客户端硬超时 15s（无法调整），AI 重绘要 20-30s
+# → 必须用异步：上传完立即返回 task_id，前端轮询拉结果
+# ============================================================
+_REDRAW_TASKS: dict[str, dict[str, Any]] = {}
+_REDRAW_TASK_TTL = 1800  # 任务结果保留 30 分钟，过期 GC
+
+
+def _gc_redraw_tasks() -> None:
+    now = time.time()
+    expired = [
+        tid for tid, t in _REDRAW_TASKS.items()
+        if now - t.get("created_at", 0) > _REDRAW_TASK_TTL
+    ]
+    for tid in expired:
+        _REDRAW_TASKS.pop(tid, None)
+
+
+def _run_redraw_task(
+    task_id: str,
+    image_bytes: bytes,
+    filename: str,
+    art_style: str,
+    openid: str,
+) -> None:
+    """后台 thread 跑 run_photo_job(redraw=True)，结果写回 _REDRAW_TASKS。"""
+    task = _REDRAW_TASKS.get(task_id)
+    if task is None:
+        return
+    task["status"] = "running"
+    task["started_at"] = time.time()
+    try:
+        analysis, poster_png = run_photo_job(
+            image_bytes, filename, redraw=True, art_style=art_style)
+        if analysis.get("redraw_used"):
+            _redraw_consume(openid, art_style)
+        task["status"] = "done"
+        task["result"] = {
+            "ok": True,
+            "analysis": analysis,
+            "poster_image_base64": base64.b64encode(poster_png).decode("ascii"),
+            "poster_mime": "image/png",
+            "redraw_remaining": _redraw_remaining(openid),
+            "redraw_limit": REDRAW_DAILY_LIMIT,
+        }
+    except Exception as e:
+        logger.exception("[redraw_task %s] failed", task_id)
+        task["status"] = "error"
+        task["error"] = str(e)
+    finally:
+        task["finished_at"] = time.time()
 
 
 def _parse_photo_options(body_or_form: Any) -> tuple[bool, str]:
@@ -393,11 +450,39 @@ async def photo_chunk(request: Request) -> JSONResponse:
     except ContentUnsafeError as e:
         raise HTTPException(status_code=400, detail=e.message) from e
 
+    # === 关键分支：AI 重绘走异步（callContainer 硬超时 15s 必死）===
+    if redraw:
+        _gc_redraw_tasks()
+        task_id = "rd_" + uuid.uuid4().hex[:16]
+        _REDRAW_TASKS[task_id] = {
+            "status": "pending",
+            "created_at": time.time(),
+            "openid": openid,
+            "art_style": art_style,
+        }
+        t = threading.Thread(
+            target=_run_redraw_task,
+            args=(task_id, full, filename, art_style, openid),
+            daemon=True,
+        )
+        t.start()
+        logger.info(
+            "[REDRAW] task created task_id=%s style=%s openid=%s",
+            task_id, art_style, (openid or "anon")[:8] + "***",
+        )
+        return JSONResponse({
+            "ok": True,
+            "done": False,
+            "async": True,
+            "task_id": task_id,
+            "status": "pending",
+            "estimated_seconds": 25,
+        })
+
+    # === 原图模式：保持同步（5-10s 不会触碰 15s 网关） ===
     try:
         analysis, poster_png = run_photo_job(
-            full, filename, redraw=redraw, art_style=art_style)
-        if analysis.get("redraw_used"):
-            _redraw_consume(openid, art_style)
+            full, filename, redraw=False, art_style=art_style)
     except HTTPException:
         raise
     except ValueError as e:
@@ -414,6 +499,48 @@ async def photo_chunk(request: Request) -> JSONResponse:
         "redraw_remaining": _redraw_remaining(openid),
         "redraw_limit": REDRAW_DAILY_LIMIT,
     })
+
+
+@app.post("/photo/redraw/result")
+async def redraw_result(request: Request) -> JSONResponse:
+    """轮询 AI 重绘任务结果（前端每 2-3s 调一次直到 done/error）。
+
+    入参 JSON: { "task_id": "rd_xxxxx" }
+    返回：{
+        ok, task_id, status: "pending|running|done|error",
+        # status=done 时附加：analysis, poster_image_base64, redraw_remaining, ...
+        # status=error 时附加：error
+    }
+    """
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"无法解析 JSON: {e}") from e
+    task_id = (body.get("task_id") or "").strip()
+    if not task_id:
+        raise HTTPException(status_code=400, detail="缺少 task_id")
+
+    task = _REDRAW_TASKS.get(task_id)
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="任务不存在或已过期（30 分钟），请重新发起",
+        )
+
+    out: dict[str, Any] = {
+        "ok": True,
+        "task_id": task_id,
+        "status": task["status"],
+    }
+    elapsed = time.time() - task.get("started_at", task.get("created_at", time.time()))
+    out["elapsed_seconds"] = round(elapsed, 1)
+
+    if task["status"] == "done":
+        out.update(task.get("result") or {})
+    elif task["status"] == "error":
+        out["error"] = task.get("error", "AI 重绘失败")
+
+    return JSONResponse(out)
 
 
 # ============================================================

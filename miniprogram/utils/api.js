@@ -145,10 +145,61 @@ async function photoTranslate(filePath, options) {
   });
 }
 
+function _sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 轮询 AI 重绘异步任务结果。callContainer 客户端硬超时 15s，
+ *  所以重绘必须走异步：start 立即返回 task_id，前端每 2.5s 轮询。
+ *
+ *  POLL_INTERVAL: 2500ms 一次（避免太频繁打日志）
+ *  MAX_WAIT:      90s（5+ 倍 Qwen-Image-Edit 平均耗时，再失败就报错）
+ */
+async function _pollRedrawResult(taskId, onProgress) {
+  const POLL_INTERVAL = 2500;
+  const MAX_WAIT_MS = 90000;
+  const started = Date.now();
+
+  while (Date.now() - started < MAX_WAIT_MS) {
+    await _sleep(POLL_INTERVAL);
+    const elapsed = Math.round((Date.now() - started) / 1000);
+
+    if (typeof onProgress === "function") {
+      try {
+        onProgress({ phase: "redraw", elapsed, max: MAX_WAIT_MS / 1000 });
+      } catch (e) {}
+    }
+
+    let r;
+    try {
+      r = await _callContainer("/photo/redraw/result", {
+        data: { task_id: taskId },
+      });
+    } catch (e) {
+      // 单次轮询失败（网络抖动）不致命，继续重试
+      console.warn("[poll] 单次轮询失败，2.5s 后重试", e);
+      continue;
+    }
+
+    if (!r || typeof r !== "object") continue;
+    if (r.status === "done") return r;
+    if (r.status === "error") {
+      throw new Error(r.error || "AI 重绘失败");
+    }
+    // pending / running 继续轮询
+  }
+  throw new Error(`AI 重绘超时（${Math.round(MAX_WAIT_MS / 1000)}s 内未完成），请稍后再试`);
+}
+
 /**
  * 分片版照片翻译 —— 绕开 callContainer 1MB 请求体限制。
- *   onProgress({ done, total }) 可选，给 UI 显示上传进度。
+ *   onProgress 回调形态：
+ *     - 上传阶段: { done, total }
+ *     - 重绘阶段: { phase: "redraw", elapsed, max }
  *   options: { redraw?: boolean, artStyle?: string }
+ *
+ *  AI 重绘最后一片走异步：服务端立即返回 task_id，
+ *  本函数自动轮询 /photo/redraw/result 直到完成。
  */
 async function photoTranslateChunked(filePath, onProgress, options) {
   const opts = options || {};
@@ -168,9 +219,6 @@ async function photoTranslateChunked(filePath, onProgress, options) {
   for (let i = 0; i < total; i++) {
     const slice = fullB64.slice(i * CHUNK, (i + 1) * CHUNK);
     const isLast = i === total - 1;
-    // AI 重绘的最后一片才是耗时路径（要等 LLM + Qwen-Image-Edit）
-    // 普通分片 60s 够用；最后一片如果开了 redraw 给 120s
-    const lastChunkTimeout = redraw ? 120000 : 90000;
     const r = await _callContainer("/photo/chunk", {
       data: {
         session_id: sessionId,
@@ -182,7 +230,8 @@ async function photoTranslateChunked(filePath, onProgress, options) {
         redraw,
         art_style: artStyle,
       },
-      timeoutMs: isLast ? lastChunkTimeout : 60000,
+      // 每片必须 < 15s 硬超时，正常 < 2s 没问题
+      timeoutMs: 14000,
     });
     if (typeof onProgress === "function") {
       try {
@@ -190,6 +239,11 @@ async function photoTranslateChunked(filePath, onProgress, options) {
       } catch (e) {}
     }
     if (isLast) lastResult = r;
+  }
+
+  // 如果是异步重绘任务 → 自动开始轮询
+  if (lastResult && lastResult.async && lastResult.task_id) {
+    return _pollRedrawResult(lastResult.task_id, onProgress);
   }
   return lastResult;
 }

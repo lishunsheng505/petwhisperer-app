@@ -314,15 +314,22 @@ Page({
       const r = await withRetry(() =>
         photoTranslateChunked(
           finalPath,
-          ({ done, total }) => {
-            const pct = Math.floor((done / total) * 100);
+          (p) => {
             let title;
-            if (pct < 100) {
-              title = `上传中 ${pct}%`;
-            } else if (isRedraw) {
-              title = "AI 重绘中…(20-40s)";
+            if (p && p.phase === "redraw") {
+              // 异步轮询阶段（AI 重绘后台进行中）
+              title = `AI 绘制中 ${p.elapsed}s…`;
+            } else if (p && typeof p.done === "number") {
+              const pct = Math.floor((p.done / p.total) * 100);
+              if (pct < 100) {
+                title = `上传中 ${pct}%`;
+              } else if (isRedraw) {
+                title = "AI 启动绘制…";
+              } else {
+                title = "生成中…";
+              }
             } else {
-              title = "生成中…";
+              title = "处理中…";
             }
             wx.showLoading({ title, mask: true });
           },
