@@ -109,12 +109,15 @@ def main():
         print(f"[1/2] 使用占位渐变图 (没传参或文件不存在)")
         print(f"     提示: python preview_poster.py path/to/pet.jpg 可换真实照片")
 
-    print(f"[2/2] 渲染 {len(CASES)} 张海报...")
+    rounds = 3  # 每个 vibe 跑几次（看主题包随机化效果）
+    print(f"[2/2] 渲染 {len(CASES)} vibe x {rounds} 轮 = {len(CASES) * rounds} 张...")
     for c in CASES:
-        out = OUT_DIR / f"preview_poster_{c['name']}.png"
-        poster = render_poster(src, c["data"])
-        poster.save(out)
-        print(f"     OK {out.name}  ({poster.size[0]}x{poster.size[1]})")
+        for r in range(rounds):
+            suffix = f"_{r + 1}" if rounds > 1 else ""
+            out = OUT_DIR / f"preview_poster_{c['name']}{suffix}.png"
+            poster = render_poster(src, c["data"])
+            poster.save(out)
+            print(f"     OK {out.name}")
 
     print(f"\n全部生成在: {OUT_DIR}")
     print(f"双击图片看效果，对比 4 个 vibe 的视觉差异")

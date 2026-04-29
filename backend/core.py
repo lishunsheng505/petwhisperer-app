@@ -1124,16 +1124,22 @@ def _draw_palette_strip(canvas: Image.Image, palette: list[str], W: int,
     return y + block_h + 44
 
 
+# ================================================================
+#  手绘风 doodle 工具集 — 模拟"咖啡馆手账"装饰，不再用几何符号
+#  所有 doodle 都用细线条（line/arc/ellipse outline）模拟手绘笔触，
+#  避免实心几何带来的"机器感"
+# ================================================================
+
 def _draw_heart(d: ImageDraw.ImageDraw, cx: int, cy: int, size: int,
                 fill: tuple) -> None:
-    """手绘风小爱心。size 是大致总宽。"""
+    """实心小爱心 (size 是大致总宽)"""
     r = size // 2
     d.ellipse([cx - size // 2, cy - r // 2, cx, cy + r // 2], fill=fill)
     d.ellipse([cx, cy - r // 2, cx + size // 2, cy + r // 2], fill=fill)
     d.polygon([
         (cx - size // 2 + 2, cy + r // 4),
         (cx + size // 2 - 2, cy + r // 4),
-        (cx, cy + size // 1.4),
+        (cx, cy + int(size / 1.4)),
     ], fill=fill)
 
 
@@ -1147,23 +1153,255 @@ def _draw_sparkle(d: ImageDraw.ImageDraw, cx: int, cy: int, size: int,
                (cx, cy + s // 3)], fill=fill)
 
 
+def _draw_steam(d: ImageDraw.ImageDraw, cx: int, top_y: int, height: int,
+                spread: int, color: tuple, line_w: int) -> None:
+    """3 条波浪形蒸汽线，向上飘。"""
+    for offset, phase in [(-spread, 0), (0, math.pi), (spread, math.pi / 2)]:
+        prev = None
+        for t in range(0, height, 3):
+            wob = math.sin((t * 0.18) + phase) * 5
+            x = cx + offset + int(wob)
+            y = top_y - t
+            if prev:
+                d.line([prev, (x, y)], fill=color, width=line_w)
+            prev = (x, y)
+
+
+def _draw_coffee_cup(d: ImageDraw.ImageDraw, cx: int, cy_bot: int,
+                     size: int, color: tuple) -> None:
+    """手绘咖啡杯 (cx, cy_bot 是杯子底部中心，size 是杯身宽度)。
+    包含杯身梯形、杯口椭圆、把手半圆、3 条蒸汽线、底部小爱心装饰。
+    """
+    w = size
+    h = int(size * 0.9)
+    lw = max(3, size // 18)
+
+    bx0, bx1 = cx - w // 2, cx + w // 2
+    bx0t = cx - int(w * 0.42)
+    bx1t = cx + int(w * 0.42)
+    by_top = cy_bot - h
+
+    d.line([(bx0, cy_bot), (bx0t, by_top)], fill=color, width=lw)
+    d.line([(bx1, cy_bot), (bx1t, by_top)], fill=color, width=lw)
+    d.arc([bx0, cy_bot - 8, bx1, cy_bot + 14], start=0, end=180,
+          fill=color, width=lw)
+    d.ellipse([bx0t - 4, by_top - 5, bx1t + 4, by_top + 5],
+              outline=color, width=lw)
+    d.ellipse([bx0t + 6, by_top - 1, bx1t - 6, by_top + 5],
+              outline=color, width=max(1, lw - 1))
+
+    hh = int(h * 0.55)
+    hx = bx1 - lw
+    handle_w = size // 3
+    d.arc([hx, by_top + (h - hh) // 2,
+           hx + handle_w, by_top + (h - hh) // 2 + hh],
+          start=270, end=90, fill=color, width=lw)
+
+    _draw_steam(d, cx, by_top - 6, int(size * 0.65),
+                size // 7, color, max(2, lw - 1))
+
+    # 杯前小心心（手账风装饰）
+    heart_size = max(8, size // 7)
+    _draw_heart(d, cx, cy_bot - h // 2, heart_size, color)
+
+
+def _draw_plant_branch(d: ImageDraw.ImageDraw, cx: int, cy_top: int,
+                       length: int, color: tuple,
+                       direction: int = 1) -> None:
+    """植物枝桠：从顶向下/向上画 S 形茎 + 4-6 片椭圆叶子。
+    direction=1 向下生长，-1 向上。
+    """
+    lw = max(2, length // 35)
+    pts = []
+    for t in range(0, length, 3):
+        wob = math.sin(t * 0.04) * 8
+        x = cx + int(wob)
+        y = cy_top + t * direction
+        pts.append((x, y))
+    for i in range(len(pts) - 1):
+        d.line([pts[i], pts[i + 1]], fill=color, width=lw)
+
+    leaves = [(0.18, -1), (0.32, 1), (0.50, -1), (0.68, 1), (0.85, -1)]
+    leaf_w = max(16, length // 5)
+    leaf_h = max(8, length // 9)
+    soft_fill = tuple(min(255, int(c * 0.45 + 130)) for c in color[:3])
+    for t_ratio, side in leaves:
+        idx = min(int(len(pts) * t_ratio), len(pts) - 1)
+        sx, sy = pts[idx]
+        ex0 = sx
+        ex1 = sx + side * leaf_w
+        ey0 = sy - leaf_h
+        ey1 = sy + leaf_h // 2
+        box = [min(ex0, ex1), min(ey0, ey1),
+               max(ex0, ex1), max(ey0, ey1)]
+        d.ellipse(box, fill=soft_fill, outline=color, width=lw)
+        d.line([(sx, sy), (sx + side * leaf_w * 3 // 4,
+                           sy - leaf_h // 4)],
+               fill=color, width=max(1, lw - 1))
+
+
+def _draw_coffee_stain(canvas: Image.Image, cx: int, cy: int, r: int,
+                       color: tuple) -> None:
+    """咖啡渍水印：半透明圆形 + 边缘加深小弧。需要在 RGBA canvas 上画。"""
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    base = color[:3]
+    ld.ellipse([cx - r, cy - r, cx + r, cy + r], fill=base + (45,))
+    ld.ellipse([cx - r + 8, cy - r + 6, cx + r - 5, cy + r - 8],
+               outline=base + (100,), width=2)
+    ld.arc([cx - r, cy - r // 4, cx + r, cy + int(r * 1.5)],
+           start=15, end=165, fill=base + (140,), width=3)
+    canvas.alpha_composite(layer)
+
+
+def _draw_camera(d: ImageDraw.ImageDraw, cx: int, cy: int, size: int,
+                 color: tuple) -> None:
+    """简笔相机 doodle"""
+    lw = max(3, size // 20)
+    bw = size
+    bh = int(size * 0.7)
+    bx0, by0 = cx - bw // 2, cy - bh // 2
+    bx1, by1 = cx + bw // 2, cy + bh // 2
+    # 相机机身（圆角矩形 outline）
+    d.rounded_rectangle([bx0, by0, bx1, by1], radius=size // 10,
+                        outline=color, width=lw)
+    # 顶部凸起
+    pop_w = size // 3
+    d.rounded_rectangle([cx - pop_w // 2, by0 - size // 8,
+                         cx + pop_w // 2, by0 + 4],
+                        radius=size // 18, outline=color, width=lw)
+    # 镜头
+    lens_r = size // 4
+    d.ellipse([cx - lens_r, cy - lens_r, cx + lens_r, cy + lens_r],
+              outline=color, width=lw)
+    d.ellipse([cx - lens_r // 2, cy - lens_r // 2,
+               cx + lens_r // 2, cy + lens_r // 2],
+              outline=color, width=max(1, lw - 1))
+    # 闪光灯小圆
+    d.ellipse([bx1 - size // 6, by0 + 6, bx1 - size // 12, by0 + 6 + size // 12],
+              outline=color, width=max(1, lw - 1))
+
+
+def _draw_pencil(d: ImageDraw.ImageDraw, cx: int, cy: int, length: int,
+                 color: tuple) -> None:
+    """斜置铅笔 doodle（笔身淡色填充 + 深色描边，更醒目）"""
+    lw = max(3, length // 28)
+    half = length // 2
+    angle = math.radians(-25)
+    dx = math.cos(angle) * half
+    dy = math.sin(angle) * half
+    perp = math.radians(-25 + 90)
+    pdx = math.cos(perp) * length / 14
+    pdy = math.sin(perp) * length / 14
+    body0 = (int(cx - dx + pdx), int(cy - dy + pdy))
+    body1 = (int(cx + dx * 0.7 + pdx), int(cy + dy * 0.7 + pdy))
+    body2 = (int(cx + dx * 0.7 - pdx), int(cy + dy * 0.7 - pdy))
+    body3 = (int(cx - dx - pdx), int(cy - dy - pdy))
+    soft_fill = tuple(min(255, int(c * 0.4 + 140)) for c in color[:3])
+    d.polygon([body0, body1, body2, body3], fill=soft_fill,
+              outline=color, width=lw)
+    tip = (int(cx + dx), int(cy + dy))
+    d.polygon([body1, body2, tip], fill=color, outline=color, width=lw)
+    er0 = (int(cx - dx + pdx - math.cos(angle) * length / 9),
+           int(cy - dy + pdy - math.sin(angle) * length / 9))
+    er1 = (int(cx - dx - pdx - math.cos(angle) * length / 9),
+           int(cy - dy - pdy - math.sin(angle) * length / 9))
+    eraser_fill = tuple(min(255, int(c * 0.3 + 170)) for c in color[:3])
+    d.polygon([body0, body3, er1, er0], fill=eraser_fill,
+              outline=color, width=lw)
+
+
+def _draw_film_strip(d: ImageDraw.ImageDraw, cx: int, cy: int, size: int,
+                     color: tuple) -> None:
+    """电影胶片小段 doodle（5 个小方框 + 上下打孔）"""
+    lw = max(2, size // 35)
+    fw = size
+    fh = int(size * 0.45)
+    bx0, by0 = cx - fw // 2, cy - fh // 2
+    bx1, by1 = cx + fw // 2, cy + fh // 2
+    # 主框
+    d.rectangle([bx0, by0, bx1, by1], outline=color, width=lw)
+    # 上下打孔
+    n = 5
+    hole_w = fw // (n * 2)
+    for i in range(n):
+        hx = bx0 + (i * 2 + 1) * hole_w - hole_w // 2
+        # 上排
+        d.rectangle([hx, by0 + 4, hx + hole_w, by0 + fh // 5],
+                    outline=color, width=max(1, lw - 1))
+        # 下排
+        d.rectangle([hx, by1 - fh // 5, hx + hole_w, by1 - 4],
+                    outline=color, width=max(1, lw - 1))
+
+
+def _draw_small_flower(d: ImageDraw.ImageDraw, cx: int, cy: int, size: int,
+                       color: tuple) -> None:
+    """5 瓣小花 doodle"""
+    lw = max(2, size // 18)
+    petal_r = size // 3
+    for i in range(5):
+        angle = math.radians(-90 + i * 72)
+        px = cx + int(math.cos(angle) * petal_r)
+        py = cy + int(math.sin(angle) * petal_r)
+        d.ellipse([px - petal_r // 2, py - petal_r // 2,
+                   px + petal_r // 2, py + petal_r // 2],
+                  outline=color, width=lw)
+    # 花心
+    cr = size // 6
+    d.ellipse([cx - cr, cy - cr, cx + cr, cy + cr], fill=color)
+
+
+# ================================================================
+#  装饰主题包 — 每张海报随机抽 1 个，让背景"满"且每次不一样
+# ================================================================
+
+_DOODLE_PACKS = ["cafe", "garden", "photo", "stationery", "minimal"]
+
+
 def _draw_corner_doodles(canvas: Image.Image, W: int, H: int,
                          theme: dict) -> None:
-    """随机化的角落手绘装饰（爱心 / 四角星 / 三角符号），每张都不一样。"""
+    """从 5 个装饰主题包里随机抽一个，在角落画手绘风装饰。
+
+    所有 doodle 都避开拍立得照片区域 (110, 100)-(970, 860)，
+    集中在四个角落 + 顶部胶带间隙处。
+    """
     d = ImageDraw.Draw(canvas)
     accent = theme["accent"][:3] if len(theme["accent"]) > 3 else theme["accent"]
-    soft = tuple(min(255, int(c * 0.7 + 60)) for c in accent)
+    soft = tuple(min(255, int(c * 0.55 + 88)) for c in accent)
 
-    style = random.choice(["heart_left", "spark_right", "mixed"])
+    pack = random.choice(_DOODLE_PACKS)
 
-    if style in ("heart_left", "mixed"):
-        _draw_heart(d, 80, H - 90, 38, accent)
-        _draw_heart(d, 122, H - 110, 22, soft)
+    # 注意：右下角 (W-260, H-90) 到 (W-22, H-22) 是 "AI 生成内容" 标识区，
+    # 所有右下 doodle 必须避开；建议放右下偏上 (H-200 以上) 或者右侧中段
+    if pack == "cafe":
+        _draw_coffee_stain(canvas, 80, 105, 60, accent)
+        _draw_coffee_cup(d, 110, H - 80, 100, accent)
+        _draw_plant_branch(d, W - 80, 130, 180, accent, direction=1)
 
-    if style in ("spark_right", "mixed"):
-        _draw_sparkle(d, W - 92, 170, 18, accent)
-        _draw_sparkle(d, W - 130, 210, 12, soft)
-        _draw_sparkle(d, W - 70, 220, 10, soft)
+    elif pack == "garden":
+        _draw_plant_branch(d, 90, H - 280, 220, accent, direction=1)
+        _draw_small_flower(d, W - 90, H - 220, 56, accent)
+        _draw_small_flower(d, W - 50, H - 170, 36, soft)
+        _draw_plant_branch(d, W - 90, 110, 160, accent, direction=1)
+
+    elif pack == "photo":
+        _draw_camera(d, 120, H - 90, 130, accent)
+        _draw_film_strip(d, W - 140, H - 200, 160, accent)
+        _draw_sparkle(d, W - 80, 130, 20, accent)
+        _draw_sparkle(d, W - 135, 170, 13, soft)
+        _draw_sparkle(d, W - 60, 175, 10, soft)
+
+    elif pack == "stationery":
+        _draw_coffee_stain(canvas, W - 90, 120, 52, accent)
+        _draw_pencil(d, 130, H - 80, 200, accent)
+        _draw_heart(d, W - 100, H - 220, 42, accent)
+        _draw_heart(d, W - 145, H - 245, 26, soft)
+
+    else:  # minimal — 保留极简爱心 + 星星，作为兜底
+        _draw_heart(d, 80, H - 90, 44, accent)
+        _draw_heart(d, 130, H - 115, 28, soft)
+        _draw_sparkle(d, W - 92, 170, 22, accent)
+        _draw_sparkle(d, W - 138, 210, 14, soft)
 
 
 def render_poster(img: Image.Image, data: dict) -> Image.Image:
