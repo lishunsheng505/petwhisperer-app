@@ -926,27 +926,120 @@ def _theme_for(vibe: str) -> dict:
     return base
 
 
+def _mix_rgb(a: tuple[int, int, int], b: tuple[int, int, int],
+             t: float) -> tuple[int, int, int]:
+    """Linear blend two RGB colors."""
+    return tuple(int(a[i] * (1 - t) + b[i] * t) for i in range(3))
+
+
+def _soft_blob(canvas: Image.Image, box: tuple[int, int, int, int],
+               color: tuple[int, int, int], alpha: int,
+               blur: int = 34) -> None:
+    """Draw a blurred watercolor-like blob on the RGBA canvas."""
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    ld.ellipse(box, fill=color + (alpha,))
+    layer = layer.filter(ImageFilter.GaussianBlur(radius=blur))
+    canvas.alpha_composite(layer)
+
+
 def _bg_paper(W: int, H: int, theme: dict) -> Image.Image:
-    """米白色信纸背景 + 极淡横纹（模拟手账纸质感）。"""
-    canvas = Image.new("RGBA", (W, H), theme["bg"] + (255,))
+    """旧纸手账背景。
+
+    v3.3 不再是纯色底 + 横线，而是程序生成一张完整纸质底图：
+    - 轻微竖向暖色渐变
+    - 纸张噪声 / 纤维短线 / 边缘暗角
+    - 淡水彩晕染与咖啡渍
+    - 固定手账元素（咖啡杯、右上植物），让每张都接近参考图的底色气质
+    """
+    base = np.array(theme["bg"], dtype=np.float32)
+    yy = np.linspace(0, 1, H, dtype=np.float32)[:, None]
+    xx = np.linspace(0, 1, W, dtype=np.float32)[None, :]
+
+    # Warm top-to-bottom paper gradient + subtle edge vignette.
+    top = np.array(_mix_rgb(tuple(base.astype(int)), (255, 248, 235), 0.22),
+                   dtype=np.float32)
+    bottom = np.array(_mix_rgb(tuple(base.astype(int)), (238, 222, 192), 0.20),
+                      dtype=np.float32)
+    grad = top * (1 - yy)[:, :, None] + bottom * yy[:, :, None]
+    dist = np.sqrt((xx - 0.5) ** 2 + ((yy - 0.46) * 0.78) ** 2)
+    vignette = np.clip((dist - 0.36) / 0.38, 0, 1)
+    grad = grad * (1 - vignette[:, :, None] * 0.08)
+
+    # Paper grain: enough to break the "flat color" feeling, still clean for text.
+    noise = np.random.normal(0, 3.0, (H, W, 1)).astype(np.float32)
+    arr = np.clip(grad + noise, 0, 255).astype(np.uint8)
+    canvas = Image.fromarray(arr, "RGB").convert("RGBA")
+
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(overlay)
+
+    # Notebook ruled lines, slightly uneven and warm.
     line_step = 38
     for y in range(line_step, H, line_step):
-        d.line([(0, y), (W, y)], fill=theme["bg_line"], width=1)
-    return Image.alpha_composite(canvas, overlay)
+        jitter = random.randint(-1, 1)
+        d.line([(0, y + jitter), (W, y + jitter)],
+               fill=theme["bg_line"], width=1)
+
+    # Random short paper fibers / scratches.
+    fiber_color = _mix_rgb(theme["subtitle"], theme["bg"], 0.55) + (30,)
+    for _ in range(120):
+        x = random.randint(0, W)
+        y = random.randint(0, H)
+        ln = random.randint(8, 34)
+        angle = random.uniform(-0.18, 0.18)
+        d.line([(x, y), (x + int(math.cos(angle) * ln),
+                         y + int(math.sin(angle) * ln))],
+               fill=fiber_color, width=1)
+
+    # Faint rounded border like scanned stationery paper.
+    border = _mix_rgb(theme["subtitle"], theme["bg"], 0.68) + (38,)
+    d.rounded_rectangle([28, 28, W - 28, H - 28], radius=34,
+                        outline=border, width=2)
+    canvas = Image.alpha_composite(canvas, overlay)
+
+    accent = theme["accent"][:3] if len(theme["accent"]) > 3 else theme["accent"]
+    soft_accent = _mix_rgb(accent, theme["bg"], 0.55)
+
+    # Watercolor stains and coffee rings, intentionally outside the photo area.
+    _soft_blob(canvas, (-110, 10, 210, 310), soft_accent, 24, blur=46)
+    _soft_blob(canvas, (W - 260, 40, W + 110, 330), soft_accent, 18, blur=52)
+    _soft_blob(canvas, (40, H - 360, 340, H - 80), soft_accent, 14, blur=54)
+    _draw_coffee_stain(canvas, 82, 92, 62, accent)
+    _draw_coffee_stain(canvas, W - 86, 132, 48, accent)
+
+    # Background doodles are drawn before the photo card. The card will cover
+    # anything that overlaps, keeping the final layout tidy.
+    bd = ImageDraw.Draw(canvas)
+    _draw_plant_branch(bd, W - 92, 120, 168, accent, direction=1)
+    _draw_coffee_cup(bd, 112, H - 118, 96, accent)
+    return canvas
 
 
 def _draw_washi_tapes(canvas: Image.Image, W: int, H: int, theme: dict) -> None:
-    """顶部两条手撕胶带（半透明色块 + 微旋转）。"""
+    """顶部两条手撕胶带（半透明色块 + 微旋转 + 纸纹）。"""
     tape_w, tape_h = 220, 50
 
-    t1 = Image.new("RGBA", (tape_w, tape_h), theme["tape_a"])
-    t1 = t1.rotate(-8, resample=Image.Resampling.BICUBIC, expand=True)
+    def _make_tape(fill: tuple[int, int, int, int], angle: float) -> Image.Image:
+        tape = Image.new("RGBA", (tape_w, tape_h), fill)
+        td = ImageDraw.Draw(tape)
+        # Subtle vertical paper fibers and irregular ends.
+        for _ in range(26):
+            x = random.randint(0, tape_w)
+            td.line([(x, random.randint(0, tape_h // 3)),
+                     (x + random.randint(-2, 2), tape_h)],
+                    fill=(255, 255, 255, 32), width=1)
+        for y in range(0, tape_h, 8):
+            td.line([(0, y), (random.randint(7, 20), y + random.randint(-2, 2))],
+                    fill=(255, 255, 255, 40), width=1)
+            td.line([(tape_w - random.randint(7, 20), y + random.randint(-2, 2)),
+                     (tape_w, y)], fill=(255, 255, 255, 40), width=1)
+        return tape.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
+
+    t1 = _make_tape(theme["tape_a"], -8)
     canvas.alpha_composite(t1, dest=(60, 40))
 
-    t2 = Image.new("RGBA", (tape_w, tape_h), theme["tape_b"])
-    t2 = t2.rotate(7, resample=Image.Resampling.BICUBIC, expand=True)
+    t2 = _make_tape(theme["tape_b"], 7)
     canvas.alpha_composite(t2, dest=(W - 220 - 60, 40))
 
 
@@ -1477,10 +1570,12 @@ def render_poster(img: Image.Image, data: dict) -> Image.Image:
     _draw_washi_tapes(canvas, W, H, theme)
 
     tilt = random.uniform(-2.8, 1.5)
+    # v3.3: slightly smaller photo card so the paper texture / doodles can breathe.
+    # Reference-style journal posters rely on visible background, not a full-bleed card.
     photo_block = _build_photo_block(
-        photo, frame_w=940, frame_h=760, tilt=tilt, theme=theme)
+        photo, frame_w=880, frame_h=690, tilt=tilt, theme=theme)
     pbx = (W - photo_block.width) // 2
-    pby = 100
+    pby = 112
     canvas.alpha_composite(photo_block, dest=(pbx, pby))
 
     title = (data.get("quote_cn") or "今天也是被治愈的一天").strip()
