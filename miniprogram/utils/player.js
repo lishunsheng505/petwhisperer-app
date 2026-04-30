@@ -1,9 +1,14 @@
+const { cleanupByPrefix, emergencyClear } = require("./storage_cleanup.js");
+
 function _b64ToTempFile(base64, ext = "mp3") {
   return new Promise((resolve, reject) => {
     if (!base64 || typeof base64 !== "string") {
       reject(new Error("音频数据为空或非 base64 字符串"));
       return;
     }
+
+    // ★ 写入前先清掉所有旧 audio_*, 避免 USER_DATA_PATH 10MB 配额满
+    cleanupByPrefix("audio_", 0);
 
     const cleaned = base64.replace(/[^A-Za-z0-9+/=]/g, "");
     const fs = wx.getFileSystemManager();
@@ -22,8 +27,41 @@ function _b64ToTempFile(base64, ext = "mp3") {
     // 4 条路径依次尝试。每条失败就走下一条，最后全失败才 reject 给上层。
     // 把每一步的 errMsg 记下来，最终 reject 时一并暴露,前端 toast 能看到全貌。
     const errors = [];
+    let didEmergencyClear = false;
 
+    // 全失败前的最后一招: 紧急清掉所有缓存文件再试一次 writeFile.
+    // 解决"用了几十次后 USER_DATA_PATH 配额满"的根因.
     const finalReject = () => {
+      const isQuotaFull = errors.some((e) => {
+        const m = (e && (e.errMsg || e.message)) || String(e);
+        return /storage limit/i.test(m) || /maximum size/i.test(m);
+      });
+      if (isQuotaFull && !didEmergencyClear) {
+        didEmergencyClear = true;
+        console.warn("[player] 触达存储配额, 紧急清缓存重试");
+        const cleared = emergencyClear();
+        if (cleared) {
+          fs.writeFile({
+            filePath: tempPath,
+            data: cleaned,
+            encoding: "base64",
+            success: () => {
+              console.log("[player] 紧急清缓存后重试 ok", tempPath);
+              resolve(tempPath);
+            },
+            fail: (eR) => {
+              console.error("[player] 紧急清缓存后重试也失败", eR);
+              errors.push(eR);
+              reject(new Error(
+                "all writeFile paths failed (after emergency clear): " +
+                errors.map((e) => (e && (e.errMsg || e.message)) || String(e))
+                  .join(" | ")
+              ));
+            },
+          });
+          return;
+        }
+      }
       reject(new Error(
         "all writeFile paths failed: " + errors.map(
           (e) => (e && (e.errMsg || e.message)) || String(e)

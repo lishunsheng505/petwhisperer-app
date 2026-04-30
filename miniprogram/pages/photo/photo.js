@@ -7,6 +7,7 @@ const {
 } = require("../../utils/api.js");
 const history = require("../../utils/history.js");
 const pending = require("../../utils/redraw_pending.js");
+const { cleanupByPrefix } = require("../../utils/storage_cleanup.js");
 const { toFriendly, withRetry, isFriendlyError } = require("../../utils/errors.js");
 
 // 订阅消息模板 ID。请到 mp.weixin.qq.com → 订阅消息 → 我的模板里申请，
@@ -194,6 +195,8 @@ Page({
 
     let posterPath = "";
     if (posterB64) {
+      // 写新图前清掉所有旧 poster_view_*, 避免 USER_DATA_PATH 10MB 配额满
+      cleanupByPrefix("poster_view_", 0);
       posterPath = await new Promise((resolve) => {
         const fs = wx.getFileSystemManager();
         const p = `${wx.env.USER_DATA_PATH}/poster_view_${Date.now()}.png`;
@@ -700,6 +703,8 @@ Page({
       // 写文件失败时 fallback 到 data URL（image 组件兼容，至少不会"图没了"）。
       let posterPath = "";
       if (posterB64) {
+        // 写新图前清掉所有旧 poster_view_*, 避免 USER_DATA_PATH 10MB 配额满
+        cleanupByPrefix("poster_view_", 0);
         posterPath = await new Promise((resolve) => {
           const fs = wx.getFileSystemManager();
           const p = `${wx.env.USER_DATA_PATH}/poster_view_${Date.now()}.png`;
