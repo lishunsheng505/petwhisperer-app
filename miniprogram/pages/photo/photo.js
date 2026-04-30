@@ -122,6 +122,7 @@ Page({
     redrawRemaining: 5,
     redrawLimit: 5,
     redrawBonus: 0,
+    redrawCap: 20,
 
     historyOpen: false,
     historyList: [],
@@ -324,6 +325,9 @@ Page({
         if (typeof r.redraw_bonus === "number") {
           next.redrawBonus = r.redraw_bonus;
         }
+        if (typeof r.redraw_cap === "number") {
+          next.redrawCap = r.redraw_cap;
+        }
         this.setData(next);
       })
       .catch((e) => {
@@ -349,21 +353,56 @@ Page({
   _maybePromptShareBonus() {
     const _self = this;
     wx.showModal({
-      title: "想再画几张？",
-      content: "把海报分享给好友 / 朋友圈\n每分享一次 +2 次 AI 重绘机会（每天最高 20 次）",
+      title: "次数用完啦 😢",
+      content: `把海报分享给好友 / 朋友圈\n每分享一次 +2 次 AI 重绘\n(每天最多 ${this.data.redrawCap} 次)`,
       confirmText: "去分享",
-      cancelText: "下次",
+      cancelText: "再看看",
       confirmColor: "#FF6B6B",
       success(r) {
         if (r.confirm) {
-          // 调起分享菜单（用户必须主动点系统分享按钮才能真分享）
           wx.showShareMenu({ withShareTicket: false });
           wx.showToast({
             title: "请点击右上角 ··· 选择分享",
             icon: "none",
             duration: 2200,
           });
-          // 标记一下，等用户从分享回来时领取奖励
+          _self._pendingShareBonus = true;
+        }
+        // 即使用户点了"再看看"也不要紧:UI 上始终有"分享 +2 次"的常驻入口,
+        // 用户后面任意时刻想用都能主动触发,不会因这一次没点而错过
+      },
+    });
+  },
+
+  // 用户主动点 wxml 上 "分享好友 +2 次" 按钮(open-type=share)时触发,
+  // 标记一下,等 onShareAppMessage 回来时去后端领奖
+  prepareShareBonus() {
+    this._pendingShareBonus = true;
+    wx.showToast({
+      title: "请选择要分享的好友",
+      icon: "none",
+      duration: 1800,
+    });
+  },
+
+  // 当 redrawRemaining > 0 时给用户的次要入口:常驻"分享好友 +2 次"链接
+  // 没法直接靠 bindtap 弹分享菜单(微信限制),所以用 modal 引导走右上角
+  openShareDialog() {
+    const _self = this;
+    wx.showModal({
+      title: "提前攒次数",
+      content: `分享给好友 / 朋友圈,每次 +2 次 AI 重绘\n(每天最多 ${this.data.redrawCap} 次)`,
+      confirmText: "去分享",
+      cancelText: "下次",
+      confirmColor: "#FF6B6B",
+      success(r) {
+        if (r.confirm) {
+          wx.showShareMenu({ withShareTicket: false });
+          wx.showToast({
+            title: "请点击右上角 ··· 选择分享",
+            icon: "none",
+            duration: 2200,
+          });
           _self._pendingShareBonus = true;
         }
       },
@@ -767,8 +806,13 @@ Page({
       });
       this.setData({ historyList: this._buildHistory() });
 
-      // 用了重绘 + 配额所剩不多时，温柔引导分享解锁
-      if (a.redraw_used && next.redrawRemaining <= 2) {
+      // 仅当真正用完(0 次)且还没达到日上限时弹分享提示.
+      // 不再 ≤2 时打扰 - 用户可以通过 wxml 上的常驻"分享 +2 次"入口主动获取
+      if (
+        a.redraw_used &&
+        next.redrawRemaining === 0 &&
+        (next.redrawLimit || 0) < (this.data.redrawCap || 20)
+      ) {
         this._maybePromptShareBonus();
       }
     } catch (e) {

@@ -104,22 +104,45 @@
           </view>
         </view>
 
-        <view wx:if="{{mode === 'redraw' && redrawRemaining === 0}}" class="quota-warn">
-          ⚠️ 今日 AI 重绘次数已用完，明天再来吧～（或先选"原图模板"）
+        <view wx:if="{{mode === 'redraw' && redrawRemaining === 0 && redrawLimit < redrawCap}}" class="quota-empty">
+          <view class="quota-empty-emoji">😢</view>
+          <view class="quota-empty-title">今日基础额度用完啦</view>
+          <view class="quota-empty-sub">分享一次 +2 次 · 每天最多 {{redrawCap}} 次</view>
+        </view>
+        <view wx:if="{{mode === 'redraw' && redrawRemaining === 0 && redrawLimit >= redrawCap}}" class="quota-warn">
+          ⚠️ 今日已达上限({{redrawCap}} 次),明天再来吧～
         </view>
       </view>
 
       <view wx:if="{{errorMsg}}" class="error">{{errorMsg}}</view>
 
       <button
+        wx:if="{{mode !== 'redraw' || redrawRemaining > 0 || redrawLimit >= redrawCap}}"
         class="btn big-btn"
         bindtap="startTranslate"
         loading="{{loading}}"
         disabled="{{loading || !fileName || (mode === 'redraw' && redrawRemaining === 0)}}"
       >
-        <text wx:if="{{mode === 'redraw'}}">🎨 AI 重绘 · 生成海报（消耗 1 次）</text>
+        <text wx:if="{{mode === 'redraw'}}">🎨 AI 重绘 · 生成海报(消耗 1 次)</text>
         <text wx:else>✨ 生成趣味文案海报</text>
       </button>
+
+      <button
+        wx:if="{{mode === 'redraw' && redrawRemaining === 0 && redrawLimit < redrawCap}}"
+        class="btn big-btn share-bonus-btn"
+        open-type="share"
+        bindtap="prepareShareBonus"
+      >
+        📣 分享好友 · 立得 +2 次重绘
+      </button>
+
+      <view
+        wx:if="{{mode === 'redraw' && redrawRemaining > 0 && redrawLimit < redrawCap}}"
+        class="share-link-tip"
+      >
+        想多画几张?
+        <text class="share-link" bindtap="openShareDialog">分享好友 +2 次</text>
+      </view>
     </view>
 
     <!-- Result card -->

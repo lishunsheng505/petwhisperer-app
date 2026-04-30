@@ -36,6 +36,30 @@ function toFriendly(e, ctx) {
   if (raw.indexOf("CONTAINER_INSTANCE_ZERO") >= 0) {
     return "服务器正在启动，请稍等 10 秒后重试";
   }
+  if (m.indexOf("102002") >= 0) {
+    return "服务正在升级或处理较慢，请稍后再试";
+  }
+
+  // ===== AI 厂商业务报错（SiliconFlow / Qwen / OpenAI 兼容协议） =====
+  // 30031 / "balance is insufficient" → 厂商账户余额不足
+  if (
+    m.indexOf("balance is insufficient") >= 0 ||
+    m.indexOf("insufficient balance") >= 0 ||
+    raw.indexOf("30031") >= 0
+  ) {
+    return "AI 服务今日额度已用完，请稍后再来 🙏";
+  }
+  // 30001 通常是 "model not exist / disabled"
+  if (m.indexOf("model disabled") >= 0 || m.indexOf("model not exist") >= 0) {
+    return "AI 模型暂时不可用，工程师正在恢复，请稍后";
+  }
+  // 30002 / 30005 等限流
+  if (m.indexOf("rate limit") >= 0 || m.indexOf("too many requests") >= 0) {
+    return "请求太频繁，请稍等几秒后再试";
+  }
+  if (m.indexOf("invalid api key") >= 0 || m.indexOf("authentication") >= 0) {
+    return "AI 服务暂时不可用，请稍后再试";
+  }
 
   // HTTP 状态
   if (m.indexOf("statuscode") >= 0) {

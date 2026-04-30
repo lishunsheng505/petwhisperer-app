@@ -240,6 +240,52 @@
   line-height: 1.5;
 }
 
+.quota-empty {
+  margin-top: 22rpx;
+  padding: 28rpx 20rpx 22rpx;
+  background: linear-gradient(135deg, #FFF1EC 0%, #FFE6D7 100%);
+  border-radius: 18rpx;
+  text-align: center;
+  border: 2rpx solid rgba(255, 107, 107, 0.15);
+}
+.quota-empty-emoji {
+  font-size: 56rpx;
+  line-height: 1;
+  margin-bottom: 8rpx;
+}
+.quota-empty-title {
+  font-size: 30rpx;
+  color: #C0392B;
+  font-weight: 600;
+  margin-bottom: 6rpx;
+}
+.quota-empty-sub {
+  font-size: 22rpx;
+  color: #8B4F2A;
+  line-height: 1.5;
+}
+
+.share-bonus-btn {
+  background: linear-gradient(135deg, #FF8A65 0%, #FF6B6B 100%) !important;
+  color: #FFFFFF !important;
+  font-weight: 600;
+  letter-spacing: 1rpx;
+}
+
+.share-link-tip {
+  margin-top: 16rpx;
+  text-align: center;
+  font-size: 22rpx;
+  color: #8B8580;
+}
+.share-link {
+  color: #FF6B6B;
+  font-weight: 600;
+  margin-left: 6rpx;
+  border-bottom: 2rpx dashed #FF6B6B;
+  padding-bottom: 1rpx;
+}
+
 .result-card {
   position: relative;
   overflow: hidden;
