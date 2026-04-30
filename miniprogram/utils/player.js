@@ -1,27 +1,63 @@
 function _b64ToTempFile(base64, ext = "mp3") {
   return new Promise((resolve, reject) => {
-    const fs = wx.getFileSystemManager();
-    // 用 random 取代 Date.now() 避免极端情况下 1ms 内连续两次写同名文件
-    const rand = Math.random().toString(36).slice(2, 8);
-    const tempPath = `${wx.env.USER_DATA_PATH}/audio_${Date.now()}_${rand}.${ext}`;
-    console.log("[player] 写音频文件", {
-      base64_len: (base64 || "").length,
-      path: tempPath,
-    });
     if (!base64 || typeof base64 !== "string") {
       reject(new Error("音频数据为空或非 base64 字符串"));
       return;
     }
-    fs.writeFile({
-      filePath: tempPath,
-      data: base64,
-      encoding: "base64",
-      success: () => resolve(tempPath),
-      fail: (e) => {
-        console.error("[player] writeFile 失败", e);
-        reject(e);
-      },
+
+    // 清掉空白/换行（极少数链路会加 \n），只保留 base64 合法字符 + 等号
+    const cleaned = base64.replace(/[^A-Za-z0-9+/=]/g, "");
+
+    const fs = wx.getFileSystemManager();
+    const rand = Math.random().toString(36).slice(2, 8);
+    const tempPath = `${wx.env.USER_DATA_PATH}/audio_${Date.now()}_${rand}.${ext}`;
+    console.log("[player] 写音频文件", {
+      base64_raw_len: base64.length,
+      base64_clean_len: cleaned.length,
+      path: tempPath,
     });
+    base64 = cleaned;
+
+    // === 方式 A: base64 字符串 + encoding 直写（主路径，最快） ===
+    const tryBase64String = () => {
+      fs.writeFile({
+        filePath: tempPath,
+        data: base64,
+        encoding: "base64",
+        success: () => resolve(tempPath),
+        fail: (e) => {
+          console.warn("[player] base64 string 写入失败，尝试 ArrayBuffer", e);
+          tryArrayBuffer();
+        },
+      });
+    };
+
+    // === 方式 B: 转 ArrayBuffer 写（fallback，绕开 fs 对 base64 字符串的解析） ===
+    const tryArrayBuffer = () => {
+      let buf;
+      try {
+        buf = wx.base64ToArrayBuffer(base64);
+      } catch (e) {
+        console.error("[player] base64ToArrayBuffer 失败", e);
+        reject(e);
+        return;
+      }
+      fs.writeFile({
+        filePath: tempPath,
+        data: buf,
+        // 不传 encoding，data 是 ArrayBuffer
+        success: () => {
+          console.log("[player] ArrayBuffer 路径写入成功");
+          resolve(tempPath);
+        },
+        fail: (e2) => {
+          console.error("[player] ArrayBuffer 路径写入也失败", e2);
+          reject(e2);
+        },
+      });
+    };
+
+    tryBase64String();
   });
 }
 
