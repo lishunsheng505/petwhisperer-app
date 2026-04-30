@@ -365,13 +365,34 @@ function createVoicePage(pet) {
         const tts = r && r.tts_audio_base64;
         const animal = r && r.animal_audio_base64;
         const lite = _stripBase64(r);
+        const ttsErr = r && r.tts_error;
+        console.log("[voice/audio] result keys", Object.keys(r || {}), {
+          tts_len: tts ? tts.length : 0,
+          animal_len: animal ? animal.length : 0,
+          tts_error: ttsErr || null,
+        });
         this.setData({
           result: lite,
           hasTts: !!tts,
           hasAnimal: !!animal,
           loading: false,
         });
-        if (tts) this._player.loadBase64(tts, "mp3", true);
+        if (tts) {
+          this._player.loadBase64(tts, "mp3", true).catch((err) => {
+            wx.showToast({
+              title: "音频播放出错，请重试",
+              icon: "none",
+              duration: 2200,
+            });
+            console.error("[voice/audio] player load failed", err);
+          });
+        } else if (ttsErr) {
+          wx.showToast({
+            title: "声音生成失败：" + String(ttsErr).slice(0, 30),
+            icon: "none",
+            duration: 2400,
+          });
+        }
 
         history.add(pet, {
           topMode: "to_human",
@@ -436,6 +457,14 @@ function createVoicePage(pet) {
         const tts = r && r.tts_audio_base64;
         const animal = r && r.animal_audio_base64;
         const lite = _stripBase64(r);
+        const ttsErr = r && r.tts_error;
+        const animalErr = r && r.animal_audio_error;
+        console.log("[voice/text] result keys", Object.keys(r || {}), {
+          tts_len: tts ? tts.length : 0,
+          animal_len: animal ? animal.length : 0,
+          tts_error: ttsErr || null,
+          animal_error: animalErr || null,
+        });
         const guideSteps =
           apiMode === "human_to_pet_guide"
             ? parseGuide((r && r.translation) || "")
@@ -448,7 +477,26 @@ function createVoicePage(pet) {
           loading: false,
         });
         const b = animal || tts;
-        if (b) this._player.loadBase64(b, "mp3", true);
+        if (b) {
+          this._player.loadBase64(b, "mp3", true).catch((err) => {
+            wx.showToast({
+              title: "音频播放出错，请重试",
+              icon: "none",
+              duration: 2200,
+            });
+            console.error("[voice/text] player load failed", err);
+          });
+        } else {
+          // 没有音频字段：要么后端 TTS 失败了，要么音频包被路由层吞了
+          const reason = animalErr || ttsErr;
+          wx.showToast({
+            title: reason
+              ? "声音生成失败：" + String(reason).slice(0, 30)
+              : "本次没有生成声音，请重试",
+            icon: "none",
+            duration: 2400,
+          });
+        }
 
         history.add(pet, {
           topMode: "to_pet",

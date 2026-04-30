@@ -1,13 +1,26 @@
 function _b64ToTempFile(base64, ext = "mp3") {
   return new Promise((resolve, reject) => {
     const fs = wx.getFileSystemManager();
-    const tempPath = `${wx.env.USER_DATA_PATH}/audio_${Date.now()}.${ext}`;
+    // 用 random 取代 Date.now() 避免极端情况下 1ms 内连续两次写同名文件
+    const rand = Math.random().toString(36).slice(2, 8);
+    const tempPath = `${wx.env.USER_DATA_PATH}/audio_${Date.now()}_${rand}.${ext}`;
+    console.log("[player] 写音频文件", {
+      base64_len: (base64 || "").length,
+      path: tempPath,
+    });
+    if (!base64 || typeof base64 !== "string") {
+      reject(new Error("音频数据为空或非 base64 字符串"));
+      return;
+    }
     fs.writeFile({
       filePath: tempPath,
       data: base64,
       encoding: "base64",
       success: () => resolve(tempPath),
-      fail: reject,
+      fail: (e) => {
+        console.error("[player] writeFile 失败", e);
+        reject(e);
+      },
     });
   });
 }
@@ -33,6 +46,7 @@ function createPlayer(onState) {
     currentTimeStr: "00:00",
     durationStr: "00:00",
     ready: false,
+    error: "",
   };
 
   const emit = () => {
@@ -74,23 +88,43 @@ function createPlayer(onState) {
     }
     emit();
   });
-  ctx.onError(() => {
+  ctx.onError((res) => {
     state.playing = false;
+    const errMsg = (res && (res.errMsg || res.errCode)) || "未知错误";
+    state.error = `音频播放失败：${errMsg}`;
+    console.error("[player] InnerAudioContext error", res);
     emit();
   });
 
   return {
     async loadBase64(base64, ext = "mp3", autoPlay = true) {
-      if (!base64) return;
+      if (!base64) {
+        state.error = "服务端没返回音频数据";
+        emit();
+        return;
+      }
+      state.error = "";
       try { ctx.stop(); } catch (e) {}
-      const path = await _b64ToTempFile(base64, ext);
+      let path;
+      try {
+        path = await _b64ToTempFile(base64, ext);
+      } catch (e) {
+        state.error = `音频文件写入失败：${e && (e.errMsg || e.message) || e}`;
+        console.error("[player] loadBase64 失败", e);
+        emit();
+        throw e;
+      }
       state.src = path;
       state.currentTime = 0;
       state.duration = 0;
       state.ready = false;
       ctx.src = path;
       emit();
-      if (autoPlay) ctx.play();
+      if (autoPlay) {
+        try { ctx.play(); } catch (e) {
+          console.error("[player] ctx.play 抛错", e);
+        }
+      }
     },
     play() { ctx.play(); },
     pause() { ctx.pause(); },
