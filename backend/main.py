@@ -555,7 +555,7 @@ async def photo_chunk(request: Request) -> JSONResponse:
             "async": True,
             "task_id": task_id,
             "status": "pending",
-            "estimated_seconds": 10,
+            "estimated_seconds": 30,
         })
 
     # === 原图模式：保持同步（5-10s 不会触碰 15s 网关） ===

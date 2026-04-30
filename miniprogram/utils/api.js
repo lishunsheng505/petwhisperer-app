@@ -176,11 +176,12 @@ function _sleep(ms) {
  *  所以重绘必须走异步：start 立即返回 task_id，前端每 1s 轮询。
  *
  *  POLL_INTERVAL: 1000ms 一次（让完成后最快 1s 内回显，降低体感等待）
- *  MAX_WAIT:      60s（极速档多数 10-25s，超时就提示稍后重试）
+ *  MAX_WAIT:      120s（Qwen-Image-Edit 排队 + 推理常见 30-60s，
+ *                 给到 120s 才不会"明明马上出了"反而被前端判超时）
  */
 async function _pollRedrawResult(taskId, onProgress) {
   const POLL_INTERVAL = 1000;
-  const MAX_WAIT_MS = 60000;
+  const MAX_WAIT_MS = 120000;
   const started = Date.now();
 
   while (Date.now() - started < MAX_WAIT_MS) {

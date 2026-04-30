@@ -19,14 +19,15 @@ const ART_STYLE_OPTIONS = [
   { key: "vapor", label: "蒸汽波80s", emoji: "🌅" },
 ];
 
-// 等待 AI 绘制时的趣味文案，每 4 秒切一句
+// 等待 AI 绘制时的简短文案。微信 showLoading 标题只能放 6-7 个汉字，
+// 后面还要拼倒计时 "Xs"，所以每条限制 ≤ 5 个汉字，避免被截断。
 const REDRAW_WAITING_TIPS = [
-  "AI 正在调色…",
-  "AI 正在勾画毛绒线条…",
-  "AI 在拍立得里给毛孩子换装…",
-  "毛孩子说：再给它 5 秒…",
-  "马上好啦，再忍一下下…",
-  "AI 在加最后一笔光泽…",
+  "AI 调色中",
+  "勾线中",
+  "上色中",
+  "润色中",
+  "马上好啦",
+  "最后一笔",
 ];
 
 const ALLOWED_EXT = ["jpg", "jpeg", "png", "webp", "heic", "heif", "bmp", "gif"];
@@ -416,9 +417,9 @@ Page({
               if (pct < 100) {
                 title = `上传中 ${pct}%`;
               } else if (isRedraw) {
-                title = "AI 启动绘制…";
+                title = "AI 启动中";
               } else {
-                title = "生成中…";
+                title = "生成中";
               }
             } else {
               title = "处理中…";

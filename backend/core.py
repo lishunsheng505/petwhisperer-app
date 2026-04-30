@@ -579,14 +579,15 @@ def redraw_image(
     img: Image.Image,
     art_style: str = DEFAULT_ART_STYLE,
     *,
-    timeout: int = 45,
+    timeout: int = 110,
 ) -> Image.Image:
     """调用硅基流动 Qwen-Image-Edit 对宠物照片做风格化重绘。
 
     Args:
         img:        用户原图（PIL.Image，自动缩到 ≤1024 长边）
         art_style:  ART_STYLES 中的 key（默认 ghibli）
-        timeout:    单次 HTTP 超时（秒）。极速档推理 + 下载约 10-25s
+        timeout:    单次 HTTP 超时（秒）。Qwen-Image-Edit 排队 + 推理常见 25-60s，
+                    高峰期可能 80s+，所以给到 110s 才不会"差临门一脚被掐断"
 
     Returns:
         重绘后的 RGB PIL.Image。
