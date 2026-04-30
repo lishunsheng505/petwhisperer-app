@@ -5,59 +5,92 @@ function _b64ToTempFile(base64, ext = "mp3") {
       return;
     }
 
-    // 清掉空白/换行（极少数链路会加 \n），只保留 base64 合法字符 + 等号
     const cleaned = base64.replace(/[^A-Za-z0-9+/=]/g, "");
-
     const fs = wx.getFileSystemManager();
     const rand = Math.random().toString(36).slice(2, 8);
-    const tempPath = `${wx.env.USER_DATA_PATH}/audio_${Date.now()}_${rand}.${ext}`;
-    console.log("[player] 写音频文件", {
+    const userDir = wx.env.USER_DATA_PATH;
+
+    console.log("[player] env", {
+      USER_DATA_PATH: userDir,
       base64_raw_len: base64.length,
       base64_clean_len: cleaned.length,
-      path: tempPath,
     });
-    base64 = cleaned;
 
-    // === 方式 A: base64 字符串 + encoding 直写（主路径，最快） ===
-    const tryBase64String = () => {
-      fs.writeFile({
-        filePath: tempPath,
-        data: base64,
-        encoding: "base64",
-        success: () => resolve(tempPath),
-        fail: (e) => {
-          console.warn("[player] base64 string 写入失败，尝试 ArrayBuffer", e);
-          tryArrayBuffer();
-        },
-      });
+    const baseDir = userDir || "wxfile://usr";
+    const tempPath = `${baseDir}/audio_${Date.now()}_${rand}.${ext}`;
+
+    // 4 条路径依次尝试。每条失败就走下一条，最后全失败才 reject 给上层。
+    // 把每一步的 errMsg 记下来，最终 reject 时一并暴露,前端 toast 能看到全貌。
+    const errors = [];
+
+    const finalReject = () => {
+      reject(new Error(
+        "all writeFile paths failed: " + errors.map(
+          (e) => (e && (e.errMsg || e.message)) || String(e)
+        ).join(" | ")
+      ));
     };
 
-    // === 方式 B: 转 ArrayBuffer 写（fallback，绕开 fs 对 base64 字符串的解析） ===
-    const tryArrayBuffer = () => {
-      let buf;
-      try {
-        buf = wx.base64ToArrayBuffer(base64);
-      } catch (e) {
-        console.error("[player] base64ToArrayBuffer 失败", e);
-        reject(e);
-        return;
-      }
-      fs.writeFile({
-        filePath: tempPath,
-        data: buf,
-        // 不传 encoding，data 是 ArrayBuffer
-        success: () => {
-          console.log("[player] ArrayBuffer 路径写入成功");
-          resolve(tempPath);
-        },
-        fail: (e2) => {
-          console.error("[player] ArrayBuffer 路径写入也失败", e2);
-          reject(e2);
-        },
-      });
-    };
+    // 路径 1: writeFileSync + base64 string
+    try {
+      fs.writeFileSync(tempPath, cleaned, "base64");
+      console.log("[player] 路径1 writeFileSync(base64) ok", tempPath);
+      resolve(tempPath);
+      return;
+    } catch (e1) {
+      console.warn("[player] 路径1 writeFileSync(base64) fail", e1);
+      errors.push(e1);
+    }
 
-    tryBase64String();
+    // 路径 2: writeFileSync + ArrayBuffer
+    try {
+      const buf = wx.base64ToArrayBuffer(cleaned);
+      fs.writeFileSync(tempPath, buf);
+      console.log("[player] 路径2 writeFileSync(ArrayBuffer) ok", tempPath);
+      resolve(tempPath);
+      return;
+    } catch (e2) {
+      console.warn("[player] 路径2 writeFileSync(ArrayBuffer) fail", e2);
+      errors.push(e2);
+    }
+
+    // 路径 3: writeFile 异步 + base64 string
+    fs.writeFile({
+      filePath: tempPath,
+      data: cleaned,
+      encoding: "base64",
+      success: () => {
+        console.log("[player] 路径3 writeFile(base64 异步) ok", tempPath);
+        resolve(tempPath);
+      },
+      fail: (e3) => {
+        console.warn("[player] 路径3 writeFile(base64 异步) fail", e3);
+        errors.push(e3);
+
+        // 路径 4: writeFile 异步 + ArrayBuffer
+        let buf2;
+        try {
+          buf2 = wx.base64ToArrayBuffer(cleaned);
+        } catch (e4a) {
+          errors.push(e4a);
+          finalReject();
+          return;
+        }
+        fs.writeFile({
+          filePath: tempPath,
+          data: buf2,
+          success: () => {
+            console.log("[player] 路径4 writeFile(buf 异步) ok", tempPath);
+            resolve(tempPath);
+          },
+          fail: (e4) => {
+            console.error("[player] 路径4 fail, 4 条路径都挂了", e4);
+            errors.push(e4);
+            finalReject();
+          },
+        });
+      },
+    });
   });
 }
 

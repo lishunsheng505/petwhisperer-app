@@ -379,12 +379,13 @@ function createVoicePage(pet) {
         });
         if (tts) {
           this._player.loadBase64(tts, "mp3", true).catch((err) => {
-            wx.showToast({
-              title: "音频播放出错，请重试",
-              icon: "none",
-              duration: 2200,
-            });
+            const detail = (err && (err.errMsg || err.message)) || String(err);
             console.error("[voice/audio] player load failed", err);
+            wx.showModal({
+              title: "音频写入失败（请截图发开发者）",
+              content: detail,
+              showCancel: false,
+            });
           });
         } else if (ttsErr) {
           wx.showToast({
@@ -479,15 +480,15 @@ function createVoicePage(pet) {
         const b = animal || tts;
         if (b) {
           this._player.loadBase64(b, "mp3", true).catch((err) => {
-            wx.showToast({
-              title: "音频播放出错，请重试",
-              icon: "none",
-              duration: 2200,
-            });
+            const detail = (err && (err.errMsg || err.message)) || String(err);
             console.error("[voice/text] player load failed", err);
+            wx.showModal({
+              title: "音频写入失败（请截图发开发者）",
+              content: detail,
+              showCancel: false,
+            });
           });
         } else {
-          // 没有音频字段：要么后端 TTS 失败了，要么音频包被路由层吞了
           const reason = animalErr || ttsErr;
           wx.showToast({
             title: reason
