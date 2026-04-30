@@ -45,11 +45,18 @@ app = FastAPI(
 # 都设为 1，否则不同实例会各自计数导致超额。
 # 上线后接入数据库（云开发集合）即可分布式准确计数。
 # ============================================================
-# 基础免费次数：每天 5 次；分享解锁后，单日总次数最多 20 次。
-REDRAW_DAILY_LIMIT = int(os.getenv("REDRAW_DAILY_LIMIT", "5"))
-REDRAW_DAILY_CAP = int(os.getenv("REDRAW_DAILY_CAP", "20"))
-# 分享解锁的额外额度（每次分享 +2，达到 REDRAW_DAILY_CAP 后停止增加）
-REDRAW_BONUS_PER_SHARE = int(os.getenv("REDRAW_BONUS_PER_SHARE", "2"))
+# 阶段 1 (保命模式): 等接广告之前, 全部数字按"最坏也只烧 ~¥100/天"算
+#   - 单用户每天免费 3 次   (够大部分用户尝鲜)
+#   - 分享 +1 次, 单用户最多 10 次/天
+#   - 全平台每天 1000 次硬上限 (¥0.10/次 × 1000 = ¥100/天 是天花板)
+# 阶段 2 (上线 1-2 周, 广告接入后): 调宽 + 关全平台上限
+#   - 推荐通过云托管环境变量调, 不用改代码
+REDRAW_DAILY_LIMIT = int(os.getenv("REDRAW_DAILY_LIMIT", "3"))
+REDRAW_DAILY_CAP = int(os.getenv("REDRAW_DAILY_CAP", "10"))
+REDRAW_BONUS_PER_SHARE = int(os.getenv("REDRAW_BONUS_PER_SHARE", "1"))
+# 全平台日总配额: 所有用户加起来的硬上限. 0 = 不限 (阶段 2 设 0).
+REDRAW_GLOBAL_DAILY_CAP = int(os.getenv("REDRAW_GLOBAL_DAILY_CAP", "1000"))
+
 _default_bonus_times = max(
     0,
     (max(0, REDRAW_DAILY_CAP - REDRAW_DAILY_LIMIT) + REDRAW_BONUS_PER_SHARE - 1)
@@ -61,6 +68,7 @@ REDRAW_BONUS_DAILY_MAX = int(
 _REDRAW_QUOTA: dict[str, int] = {}
 _REDRAW_BONUS: dict[str, int] = {}        # openid:date → 已获得的奖励额度
 _REDRAW_BONUS_TIMES: dict[str, int] = {}  # openid:date → 今日触发奖励的次数
+_REDRAW_GLOBAL_USED: dict[str, int] = {}  # date → 今日全平台已用的总次数
 
 
 def _wx_openid(request: Request) -> str:
@@ -88,20 +96,41 @@ def _redraw_total_limit(openid: str) -> int:
     return min(REDRAW_DAILY_CAP, REDRAW_DAILY_LIMIT + bonus)
 
 
+def _global_quota_key() -> str:
+    return time.strftime("%Y-%m-%d")
+
+
+def _redraw_global_used() -> int:
+    """今日全平台已经用掉的总次数。"""
+    return _REDRAW_GLOBAL_USED.get(_global_quota_key(), 0)
+
+
+def _redraw_global_remaining() -> int:
+    """今日全平台还能再用多少次。0 表示已用完, -1 表示无全平台上限。"""
+    if REDRAW_GLOBAL_DAILY_CAP <= 0:
+        return -1
+    return max(0, REDRAW_GLOBAL_DAILY_CAP - _redraw_global_used())
+
+
 def _redraw_consume(openid: str, art_style: str = "") -> int:
-    """成功使用一次后调用：+1 已用，返回新剩余。
+    """成功使用一次后调用：+1 已用 (单用户 + 全平台双计数), 返回新剩余。
 
     同时打一行结构化日志方便云托管「运行日志」搜索 `[REDRAW]` 监控消耗。
     """
     k = _quota_key(openid)
     _REDRAW_QUOTA[k] = _REDRAW_QUOTA.get(k, 0) + 1
+    gk = _global_quota_key()
+    _REDRAW_GLOBAL_USED[gk] = _REDRAW_GLOBAL_USED.get(gk, 0) + 1
     used = _REDRAW_QUOTA[k]
     total_limit = _redraw_total_limit(openid)
     remaining = max(0, total_limit - used)
     short = (openid or "anon")[:8] + "***" if openid else "anon"
     logger.info(
-        "[REDRAW] openid=%s style=%s used=%d/%d remaining=%d cost=$0.04",
+        "[REDRAW] openid=%s style=%s used=%d/%d remaining=%d "
+        "global=%d/%d cost=¥0.10",
         short, art_style or "?", used, total_limit, remaining,
+        _REDRAW_GLOBAL_USED[gk],
+        REDRAW_GLOBAL_DAILY_CAP if REDRAW_GLOBAL_DAILY_CAP > 0 else -1,
     )
     return remaining
 
@@ -453,6 +482,8 @@ def photo_quota(request: Request) -> JSONResponse:
         "bonus_times_used": _REDRAW_BONUS_TIMES.get(k, 0),
         "bonus_times_max": REDRAW_BONUS_DAILY_MAX,
         "bonus_per_share": REDRAW_BONUS_PER_SHARE,
+        "global_remaining": _redraw_global_remaining(),
+        "global_cap": REDRAW_GLOBAL_DAILY_CAP,
         "art_styles": [
             {"key": k, "label": v["label"]} for k, v in ART_STYLES.items()
         ],
@@ -599,11 +630,22 @@ async def photo_chunk(request: Request) -> JSONResponse:
     redraw, art_style = _parse_photo_options(body)
     openid = _wx_openid(request)
 
-    if redraw and _redraw_remaining(openid) <= 0:
-        raise HTTPException(
-            status_code=429,
-            detail=f"今日 AI 重绘次数已用完（基础 {REDRAW_DAILY_LIMIT} 次，分享后最高 {REDRAW_DAILY_CAP} 次），明天再来吧～",
-        )
+    if redraw:
+        if _redraw_remaining(openid) <= 0:
+            raise HTTPException(
+                status_code=429,
+                detail=f"今日 AI 重绘次数已用完（基础 {REDRAW_DAILY_LIMIT} 次，分享后最高 {REDRAW_DAILY_CAP} 次），明天再来吧～",
+            )
+        # 全平台日上限（保命用，阶段 2 接广告后可设 0 = 不限）
+        if _redraw_global_remaining() == 0:
+            logger.warning(
+                "[REDRAW] global cap hit %d, openid=%s blocked",
+                REDRAW_GLOBAL_DAILY_CAP, (openid or "anon")[:8] + "***",
+            )
+            raise HTTPException(
+                status_code=429,
+                detail="今日 AI 重绘已被抢光啦 🔥 大家热情太高，明早 0 点重置～",
+            )
 
     try:
         check_image_safe(full, filename=filename)
@@ -992,11 +1034,21 @@ async def photo_translate(request: Request) -> JSONResponse:
         raw, filename, opts = await _read_image_input(request)
         redraw, art_style = _parse_photo_options(opts)
 
-        if redraw and _redraw_remaining(openid) <= 0:
-            raise HTTPException(
-                status_code=429,
-                detail=f"今日 AI 重绘次数已用完（基础 {REDRAW_DAILY_LIMIT} 次，分享后最高 {REDRAW_DAILY_CAP} 次），明天再来吧～",
-            )
+        if redraw:
+            if _redraw_remaining(openid) <= 0:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"今日 AI 重绘次数已用完（基础 {REDRAW_DAILY_LIMIT} 次，分享后最高 {REDRAW_DAILY_CAP} 次），明天再来吧～",
+                )
+            if _redraw_global_remaining() == 0:
+                logger.warning(
+                    "[REDRAW] global cap hit %d, openid=%s blocked (chunk)",
+                    REDRAW_GLOBAL_DAILY_CAP, (openid or "anon")[:8] + "***",
+                )
+                raise HTTPException(
+                    status_code=429,
+                    detail="今日 AI 重绘已被抢光啦 🔥 大家热情太高，明早 0 点重置～",
+                )
 
         # 微信内容安全：图片同步检测（仅 < 1MB 的图，超出依赖 LLM prompt 兜底）
         try:

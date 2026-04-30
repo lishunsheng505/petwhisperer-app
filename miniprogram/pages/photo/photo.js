@@ -119,10 +119,12 @@ Page({
     mode: "origin",
     artStyle: "ghibli",
     artStyleOptions: ART_STYLE_OPTIONS,
-    redrawRemaining: 5,
-    redrawLimit: 5,
+    redrawRemaining: 3,
+    redrawLimit: 3,
     redrawBonus: 0,
-    redrawCap: 20,
+    redrawCap: 10,
+    bonusPerShare: 1,
+    globalRemaining: -1,
 
     historyOpen: false,
     historyList: [],
@@ -328,6 +330,12 @@ Page({
         if (typeof r.redraw_cap === "number") {
           next.redrawCap = r.redraw_cap;
         }
+        if (typeof r.bonus_per_share === "number") {
+          next.bonusPerShare = r.bonus_per_share;
+        }
+        if (typeof r.global_remaining === "number") {
+          next.globalRemaining = r.global_remaining;
+        }
         this.setData(next);
       })
       .catch((e) => {
@@ -352,9 +360,10 @@ Page({
 
   _maybePromptShareBonus() {
     const _self = this;
+    const per = this.data.bonusPerShare || 1;
     wx.showModal({
       title: "次数用完啦 😢",
-      content: `把海报分享给好友 / 朋友圈\n每分享一次 +2 次 AI 重绘\n(每天最多 ${this.data.redrawCap} 次)`,
+      content: `把海报分享给好友 / 朋友圈\n每分享一次 +${per} 次 AI 重绘\n(每天最多 ${this.data.redrawCap} 次)`,
       confirmText: "去分享",
       cancelText: "再看看",
       confirmColor: "#FF6B6B",
@@ -368,7 +377,7 @@ Page({
           });
           _self._pendingShareBonus = true;
         }
-        // 即使用户点了"再看看"也不要紧:UI 上始终有"分享 +2 次"的常驻入口,
+        // 即使用户点了"再看看"也不要紧:UI 上始终有"分享 +N 次"的常驻入口,
         // 用户后面任意时刻想用都能主动触发,不会因这一次没点而错过
       },
     });
@@ -385,13 +394,14 @@ Page({
     });
   },
 
-  // 当 redrawRemaining > 0 时给用户的次要入口:常驻"分享好友 +2 次"链接
+  // 当 redrawRemaining > 0 时给用户的次要入口:常驻"分享好友 +N 次"链接
   // 没法直接靠 bindtap 弹分享菜单(微信限制),所以用 modal 引导走右上角
   openShareDialog() {
     const _self = this;
+    const per = this.data.bonusPerShare || 1;
     wx.showModal({
       title: "提前攒次数",
-      content: `分享给好友 / 朋友圈,每次 +2 次 AI 重绘\n(每天最多 ${this.data.redrawCap} 次)`,
+      content: `分享给好友 / 朋友圈,每次 +${per} 次 AI 重绘\n(每天最多 ${this.data.redrawCap} 次)`,
       confirmText: "去分享",
       cancelText: "下次",
       confirmColor: "#FF6B6B",
