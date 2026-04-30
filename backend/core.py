@@ -579,14 +579,14 @@ def redraw_image(
     img: Image.Image,
     art_style: str = DEFAULT_ART_STYLE,
     *,
-    timeout: int = 90,
+    timeout: int = 45,
 ) -> Image.Image:
     """调用硅基流动 Qwen-Image-Edit 对宠物照片做风格化重绘。
 
     Args:
         img:        用户原图（PIL.Image，自动缩到 ≤1024 长边）
         art_style:  ART_STYLES 中的 key（默认 ghibli）
-        timeout:    单次 HTTP 超时（秒）。模型推理 + 下载约 15-40s
+        timeout:    单次 HTTP 超时（秒）。极速档推理 + 下载约 10-25s
 
     Returns:
         重绘后的 RGB PIL.Image。
@@ -601,9 +601,9 @@ def redraw_image(
     if not api_key:
         raise ValueError("未配置 SILICONFLOW_API_KEY")
 
-    # 缩到长边 768：再小到 512 会丢细节，1024 又太慢；768 是
-    # 推理速度 / 出图质量 / base64 体积 的折中点
-    max_side = 768
+    # 极速档：缩到长边 640，牺牲一点细节换速度。
+    # 目标是把多数重绘压到 10-20s 区间；真实耗时仍取决于硅基流动队列。
+    max_side = 640
     w, h = img.size
     scale = min(1.0, max_side / max(w, h))
     if scale < 1.0:
@@ -612,9 +612,9 @@ def redraw_image(
     else:
         small = img
 
-    # PNG 太大用 JPEG 92 质量基本看不出差异，体积只有 PNG 的 1/3
+    # JPEG 88 进一步减小上传体积，配合 640 长边减少模型处理时间。
     buf = BytesIO()
-    small.convert("RGB").save(buf, format="JPEG", quality=92, optimize=True)
+    small.convert("RGB").save(buf, format="JPEG", quality=88, optimize=True)
     b64 = base64.b64encode(buf.getvalue()).decode("ascii")
     image_data_url = f"data:image/jpeg;base64,{b64}"
 
@@ -622,9 +622,9 @@ def redraw_image(
         "model": REDRAW_MODEL,
         "prompt": spec["prompt"],
         "image": image_data_url,
-        # 官方默认 20 → 改成 14：实测吉卜力风格 14 步已收敛，
-        # 推理时间从 ~30s 缩到 ~18s，质量肉眼无差
-        "num_inference_steps": 14,
+        # 极速档：14 → 8 步，换取更短等待时间。画面细节略降，
+        # 但对小程序海报预览足够，用户体感明显更好。
+        "num_inference_steps": 8,
         # 官方建议 Qwen-Image 系列 cfg 用 4.0；过小会丢文本/语义
         "cfg": 4.0,
     }

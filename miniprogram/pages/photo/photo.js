@@ -70,19 +70,20 @@ function _compressOnce(src, quality) {
   });
 }
 
-async function ensureUnderLimit(src, ext) {
+async function ensureUnderLimit(src, ext, maxBytes) {
   const e = (ext || "").toLowerCase();
   if (COMPRESSIBLE.indexOf(e) < 0) return src;
+  const limit = maxBytes || MAX_UPLOAD_BYTES;
   let cur = src;
   let size = await _statSize(cur);
-  if (!size || size <= MAX_UPLOAD_BYTES) return cur;
+  if (!size || size <= limit) return cur;
   for (const q of [80, 60, 40, 25, 15]) {
     try {
       const next = await _compressOnce(cur, q);
       const ns = await _statSize(next);
       cur = next;
       size = ns || size;
-      if (size <= MAX_UPLOAD_BYTES) return cur;
+      if (size <= limit) return cur;
     } catch (e) {
       break;
     }
@@ -107,8 +108,8 @@ Page({
     mode: "origin",
     artStyle: "ghibli",
     artStyleOptions: ART_STYLE_OPTIONS,
-    redrawRemaining: 8,
-    redrawLimit: 8,
+    redrawRemaining: 5,
+    redrawLimit: 5,
     redrawBonus: 0,
 
     historyOpen: false,
@@ -160,7 +161,7 @@ Page({
     const _self = this;
     wx.showModal({
       title: "想再画几张？",
-      content: "把海报分享给好友 / 朋友圈\n即可解锁 +2 次 AI 重绘机会（每天最多 +6）",
+      content: "把海报分享给好友 / 朋友圈\n每分享一次 +2 次 AI 重绘机会（每天最高 20 次）",
       confirmText: "去分享",
       cancelText: "下次",
       confirmColor: "#FF6B6B",
@@ -190,6 +191,7 @@ Page({
             this.setData({
               redrawRemaining: r.redraw_remaining,
               redrawLimit: r.redraw_limit,
+              redrawBonus: r.redraw_bonus || 0,
             });
             wx.showToast({
               title: `已 +${r.added} 次重绘机会！`,
@@ -264,6 +266,7 @@ Page({
             this.setData({
               redrawRemaining: r.redraw_remaining,
               redrawLimit: r.redraw_limit,
+              redrawBonus: r.redraw_bonus || 0,
             });
             wx.showToast({
               title: `已 +${r.added} 次重绘机会！`,
@@ -393,10 +396,15 @@ Page({
 
     try {
       const ext = (this.data.fileName || "").split(".").pop().toLowerCase();
-      const finalPath = await ensureUnderLimit(path, ext);
+      const isRedraw = this.data.mode === "redraw";
+      // AI 重绘模式后端还会压到 640 长边，所以前端先控到 2MB，减少上传分片耗时。
+      const finalPath = await ensureUnderLimit(
+        path,
+        ext,
+        isRedraw ? 2 * 1024 * 1024 : MAX_UPLOAD_BYTES
+      );
       const finalSize = await _statSize(finalPath);
       console.log("[upload size]", finalSize, "bytes");
-      const isRedraw = this.data.mode === "redraw";
       const apiOpts = { redraw: isRedraw, artStyle: this.data.artStyle };
       const r = await withRetry(() =>
         photoTranslateChunked(
@@ -405,7 +413,7 @@ Page({
             let title;
             if (p && p.phase === "redraw") {
               // 趣味文案 + 倒计时，让等待不那么煎熬
-              const tipIdx = Math.floor(p.elapsed / 4) % REDRAW_WAITING_TIPS.length;
+              const tipIdx = Math.floor(p.elapsed / 3) % REDRAW_WAITING_TIPS.length;
               title = `${REDRAW_WAITING_TIPS[tipIdx]} ${p.elapsed}s`;
             } else if (p && typeof p.done === "number") {
               const pct = Math.floor((p.done / p.total) * 100);

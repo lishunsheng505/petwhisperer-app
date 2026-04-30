@@ -44,10 +44,19 @@ app = FastAPI(
 # 都设为 1，否则不同实例会各自计数导致超额。
 # 上线后接入数据库（云开发集合）即可分布式准确计数。
 # ============================================================
-REDRAW_DAILY_LIMIT = int(os.getenv("REDRAW_DAILY_LIMIT", "8"))
-# 分享解锁的额外额度（每次分享 +2，每天最多触发 N 次）
+# 基础免费次数：每天 5 次；分享解锁后，单日总次数最多 20 次。
+REDRAW_DAILY_LIMIT = int(os.getenv("REDRAW_DAILY_LIMIT", "5"))
+REDRAW_DAILY_CAP = int(os.getenv("REDRAW_DAILY_CAP", "20"))
+# 分享解锁的额外额度（每次分享 +2，达到 REDRAW_DAILY_CAP 后停止增加）
 REDRAW_BONUS_PER_SHARE = int(os.getenv("REDRAW_BONUS_PER_SHARE", "2"))
-REDRAW_BONUS_DAILY_MAX = int(os.getenv("REDRAW_BONUS_DAILY_MAX", "3"))  # 最多 3*2=6
+_default_bonus_times = max(
+    0,
+    (max(0, REDRAW_DAILY_CAP - REDRAW_DAILY_LIMIT) + REDRAW_BONUS_PER_SHARE - 1)
+    // REDRAW_BONUS_PER_SHARE,
+)
+REDRAW_BONUS_DAILY_MAX = int(
+    os.getenv("REDRAW_BONUS_DAILY_MAX", str(_default_bonus_times))
+)
 _REDRAW_QUOTA: dict[str, int] = {}
 _REDRAW_BONUS: dict[str, int] = {}        # openid:date → 已获得的奖励额度
 _REDRAW_BONUS_TIMES: dict[str, int] = {}  # openid:date → 今日触发奖励的次数
@@ -67,7 +76,15 @@ def _redraw_remaining(openid: str) -> int:
     k = _quota_key(openid)
     used = _REDRAW_QUOTA.get(k, 0)
     bonus = _REDRAW_BONUS.get(k, 0)
-    return max(0, REDRAW_DAILY_LIMIT + bonus - used)
+    total_limit = min(REDRAW_DAILY_CAP, REDRAW_DAILY_LIMIT + bonus)
+    return max(0, total_limit - used)
+
+
+def _redraw_total_limit(openid: str) -> int:
+    """当前用户今天已解锁的总额度（基础 + 分享奖励，封顶 REDRAW_DAILY_CAP）。"""
+    k = _quota_key(openid)
+    bonus = _REDRAW_BONUS.get(k, 0)
+    return min(REDRAW_DAILY_CAP, REDRAW_DAILY_LIMIT + bonus)
 
 
 def _redraw_consume(openid: str, art_style: str = "") -> int:
@@ -78,11 +95,12 @@ def _redraw_consume(openid: str, art_style: str = "") -> int:
     k = _quota_key(openid)
     _REDRAW_QUOTA[k] = _REDRAW_QUOTA.get(k, 0) + 1
     used = _REDRAW_QUOTA[k]
-    remaining = max(0, REDRAW_DAILY_LIMIT - used)
+    total_limit = _redraw_total_limit(openid)
+    remaining = max(0, total_limit - used)
     short = (openid or "anon")[:8] + "***" if openid else "anon"
     logger.info(
         "[REDRAW] openid=%s style=%s used=%d/%d remaining=%d cost=$0.04",
-        short, art_style or "?", used, REDRAW_DAILY_LIMIT, remaining,
+        short, art_style or "?", used, total_limit, remaining,
     )
     return remaining
 
@@ -132,7 +150,9 @@ def _run_redraw_task(
             "poster_image_base64": base64.b64encode(poster_png).decode("ascii"),
             "poster_mime": "image/png",
             "redraw_remaining": _redraw_remaining(openid),
-            "redraw_limit": REDRAW_DAILY_LIMIT,
+            "redraw_limit": _redraw_total_limit(openid),
+            "redraw_base_limit": REDRAW_DAILY_LIMIT,
+            "redraw_cap": REDRAW_DAILY_CAP,
         }
     except Exception as e:
         logger.exception("[redraw_task %s] failed", task_id)
@@ -345,7 +365,9 @@ def photo_quota(request: Request) -> JSONResponse:
     return JSONResponse({
         "ok": True,
         "redraw_remaining": _redraw_remaining(openid),
-        "redraw_limit": REDRAW_DAILY_LIMIT,
+        "redraw_limit": _redraw_total_limit(openid),
+        "redraw_base_limit": REDRAW_DAILY_LIMIT,
+        "redraw_cap": REDRAW_DAILY_CAP,
         "redraw_bonus": _REDRAW_BONUS.get(k, 0),
         "bonus_times_used": _REDRAW_BONUS_TIMES.get(k, 0),
         "bonus_times_max": REDRAW_BONUS_DAILY_MAX,
@@ -360,34 +382,41 @@ def photo_quota(request: Request) -> JSONResponse:
 async def claim_share_bonus(request: Request) -> JSONResponse:
     """分享后由前端调用领取额外重绘次数。
 
-    每次分享 +REDRAW_BONUS_PER_SHARE 次，每日最多触发 REDRAW_BONUS_DAILY_MAX 次。
-    无法 100% 防作弊（前端自报），但作弊收益小（最多 6 次/天），ROI 不高。
+    每次分享 +REDRAW_BONUS_PER_SHARE 次，每日总额度最多 REDRAW_DAILY_CAP 次。
+    无法 100% 防作弊（前端自报），但额度有封顶，ROI 不高。
     """
     openid = _wx_openid(request)
     k = _quota_key(openid)
     times_used = _REDRAW_BONUS_TIMES.get(k, 0)
-    if times_used >= REDRAW_BONUS_DAILY_MAX:
+    current_bonus = _REDRAW_BONUS.get(k, 0)
+    bonus_room = max(0, REDRAW_DAILY_CAP - REDRAW_DAILY_LIMIT - current_bonus)
+    if times_used >= REDRAW_BONUS_DAILY_MAX or bonus_room <= 0:
         return JSONResponse({
             "ok": False,
-            "error": f"今日分享奖励已达上限（{REDRAW_BONUS_DAILY_MAX} 次）",
+            "error": f"今日 AI 重绘总次数已达上限（{REDRAW_DAILY_CAP} 次）",
             "redraw_remaining": _redraw_remaining(openid),
+            "redraw_limit": _redraw_total_limit(openid),
+            "redraw_cap": REDRAW_DAILY_CAP,
         }, status_code=429)
 
+    added = min(REDRAW_BONUS_PER_SHARE, bonus_room)
     _REDRAW_BONUS_TIMES[k] = times_used + 1
-    _REDRAW_BONUS[k] = _REDRAW_BONUS.get(k, 0) + REDRAW_BONUS_PER_SHARE
+    _REDRAW_BONUS[k] = current_bonus + added
 
     short = (openid or "anon")[:8] + "***" if openid else "anon"
     logger.info(
         "[SHARE_BONUS] openid=%s +%d times=%d/%d new_remaining=%d",
-        short, REDRAW_BONUS_PER_SHARE,
+        short, added,
         _REDRAW_BONUS_TIMES[k], REDRAW_BONUS_DAILY_MAX,
         _redraw_remaining(openid),
     )
     return JSONResponse({
         "ok": True,
-        "added": REDRAW_BONUS_PER_SHARE,
+        "added": added,
         "redraw_remaining": _redraw_remaining(openid),
-        "redraw_limit": REDRAW_DAILY_LIMIT,
+        "redraw_limit": _redraw_total_limit(openid),
+        "redraw_base_limit": REDRAW_DAILY_LIMIT,
+        "redraw_cap": REDRAW_DAILY_CAP,
         "redraw_bonus": _REDRAW_BONUS[k],
         "bonus_times_used": _REDRAW_BONUS_TIMES[k],
         "bonus_times_max": REDRAW_BONUS_DAILY_MAX,
@@ -492,7 +521,7 @@ async def photo_chunk(request: Request) -> JSONResponse:
     if redraw and _redraw_remaining(openid) <= 0:
         raise HTTPException(
             status_code=429,
-            detail=f"今日 AI 重绘次数已用完（每日 {REDRAW_DAILY_LIMIT} 次），明天再来吧～",
+            detail=f"今日 AI 重绘次数已用完（基础 {REDRAW_DAILY_LIMIT} 次，分享后最高 {REDRAW_DAILY_CAP} 次），明天再来吧～",
         )
 
     try:
@@ -526,7 +555,7 @@ async def photo_chunk(request: Request) -> JSONResponse:
             "async": True,
             "task_id": task_id,
             "status": "pending",
-            "estimated_seconds": 25,
+            "estimated_seconds": 10,
         })
 
     # === 原图模式：保持同步（5-10s 不会触碰 15s 网关） ===
@@ -547,7 +576,9 @@ async def photo_chunk(request: Request) -> JSONResponse:
         "analysis": analysis,
         "poster_image_base64": base64.b64encode(poster_png).decode("ascii"),
         "redraw_remaining": _redraw_remaining(openid),
-        "redraw_limit": REDRAW_DAILY_LIMIT,
+        "redraw_limit": _redraw_total_limit(openid),
+        "redraw_base_limit": REDRAW_DAILY_LIMIT,
+        "redraw_cap": REDRAW_DAILY_CAP,
     })
 
 
@@ -758,7 +789,7 @@ async def photo_translate(request: Request) -> JSONResponse:
         if redraw and _redraw_remaining(openid) <= 0:
             raise HTTPException(
                 status_code=429,
-                detail=f"今日 AI 重绘次数已用完（每日 {REDRAW_DAILY_LIMIT} 次），明天再来吧～",
+                detail=f"今日 AI 重绘次数已用完（基础 {REDRAW_DAILY_LIMIT} 次，分享后最高 {REDRAW_DAILY_CAP} 次），明天再来吧～",
             )
 
         # 微信内容安全：图片同步检测（仅 < 1MB 的图，超出依赖 LLM prompt 兜底）
@@ -791,7 +822,9 @@ async def photo_translate(request: Request) -> JSONResponse:
             "poster_image_base64": b64,
             "poster_mime": "image/png",
             "redraw_remaining": _redraw_remaining(openid),
-            "redraw_limit": REDRAW_DAILY_LIMIT,
+            "redraw_limit": _redraw_total_limit(openid),
+            "redraw_base_limit": REDRAW_DAILY_LIMIT,
+            "redraw_cap": REDRAW_DAILY_CAP,
         }
     )
 

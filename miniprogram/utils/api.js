@@ -173,14 +173,14 @@ function _sleep(ms) {
 }
 
 /** 轮询 AI 重绘异步任务结果。callContainer 客户端硬超时 15s，
- *  所以重绘必须走异步：start 立即返回 task_id，前端每 2.5s 轮询。
+ *  所以重绘必须走异步：start 立即返回 task_id，前端每 1s 轮询。
  *
- *  POLL_INTERVAL: 2500ms 一次（避免太频繁打日志）
- *  MAX_WAIT:      90s（5+ 倍 Qwen-Image-Edit 平均耗时，再失败就报错）
+ *  POLL_INTERVAL: 1000ms 一次（让完成后最快 1s 内回显，降低体感等待）
+ *  MAX_WAIT:      60s（极速档多数 10-25s，超时就提示稍后重试）
  */
 async function _pollRedrawResult(taskId, onProgress) {
-  const POLL_INTERVAL = 2500;
-  const MAX_WAIT_MS = 90000;
+  const POLL_INTERVAL = 1000;
+  const MAX_WAIT_MS = 60000;
   const started = Date.now();
 
   while (Date.now() - started < MAX_WAIT_MS) {
@@ -234,7 +234,9 @@ async function photoTranslateChunked(filePath, onProgress, options) {
 
   const fullB64 = await _readFileBase64(filePath);
   const filename = _basename(filePath) || "upload.jpg";
-  const CHUNK = 50 * 1024;
+  // callContainer 单次请求体限制约 1MB。200KB 可把请求次数降到原来的 1/4，
+  // 同时保留足够余量，上传阶段更快。
+  const CHUNK = 200 * 1024;
   const total = Math.max(1, Math.ceil(fullB64.length / CHUNK));
   const sessionId = `s_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
