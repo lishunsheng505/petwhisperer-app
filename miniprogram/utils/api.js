@@ -102,6 +102,70 @@ function getPhotoQuota() {
   });
 }
 
+/** 注册"任务完成时给我推送订阅消息"绑定。
+ *  必须在 wx.requestSubscribeMessage 用户同意后调用。
+ */
+function registerRedrawNotify(taskId) {
+  if (!taskId) return Promise.reject(new Error("缺少 task_id"));
+  if (USE_CLOUD) {
+    return _callContainer("/photo/redraw/notify_consent", {
+      data: { task_id: taskId },
+      timeoutMs: 10000,
+    });
+  }
+  return new Promise((resolve, reject) => {
+    wx.request({
+      url: `${API_BASE}/photo/redraw/notify_consent`,
+      method: "POST",
+      header: { "content-type": "application/json" },
+      data: { task_id: taskId },
+      timeout: 10000,
+      success(res) {
+        const j = typeof res.data === "object" ? res.data : parseJsonSafe(res.data);
+        if (res.statusCode >= 400) {
+          reject(j.detail || j.error || res.data);
+          return;
+        }
+        resolve(j);
+      },
+      fail: reject,
+    });
+  });
+}
+
+/** 单次拉一次 AI 重绘任务结果（不轮询）。
+ *  用于：用户从订阅消息回到小程序时，主动检查未取的任务。
+ *  返回结构同 _pollRedrawResult 的中间态：
+ *    { ok, task_id, status: "pending|running|done|error", ... }
+ */
+function pollRedrawOnce(taskId) {
+  if (!taskId) return Promise.reject(new Error("缺少 task_id"));
+  if (USE_CLOUD) {
+    return _callContainer("/photo/redraw/result", {
+      data: { task_id: taskId },
+      timeoutMs: 10000,
+    });
+  }
+  return new Promise((resolve, reject) => {
+    wx.request({
+      url: `${API_BASE}/photo/redraw/result`,
+      method: "POST",
+      header: { "content-type": "application/json" },
+      data: { task_id: taskId },
+      timeout: 10000,
+      success(res) {
+        const j = typeof res.data === "object" ? res.data : parseJsonSafe(res.data);
+        if (res.statusCode >= 400) {
+          reject(j.detail || j.error || res.data);
+          return;
+        }
+        resolve(j);
+      },
+      fail: reject,
+    });
+  });
+}
+
 /** 分享后调用：兑换额外的 AI 重绘次数。 */
 function claimShareBonus() {
   if (USE_CLOUD) {
@@ -220,10 +284,17 @@ async function _pollRedrawResult(taskId, onProgress) {
  *   onProgress 回调形态：
  *     - 上传阶段: { done, total }
  *     - 重绘阶段: { phase: "redraw", elapsed, max }
- *   options: { redraw?: boolean, artStyle?: string }
+ *   options: {
+ *     redraw?: boolean,
+ *     artStyle?: string,
+ *     // 异步重绘任务被创建时回调（仅 redraw 模式触发）。
+ *     // 返回 'background' / Promise<'background'> → 不轮询，直接 resolve task_id 信息
+ *     // 返回其它值 / 不传 → 默认行为，继续轮询直到 done
+ *     onTaskCreated?: (taskId) => 'wait' | 'background' | Promise<'wait'|'background'>,
+ *   }
  *
  *  AI 重绘最后一片走异步：服务端立即返回 task_id，
- *  本函数自动轮询 /photo/redraw/result 直到完成。
+ *  本函数自动轮询 /photo/redraw/result 直到完成（除非 onTaskCreated 选 background）。
  */
 async function photoTranslateChunked(filePath, onProgress, options) {
   const opts = options || {};
@@ -232,6 +303,7 @@ async function photoTranslateChunked(filePath, onProgress, options) {
   }
   const redraw = !!opts.redraw;
   const artStyle = opts.artStyle || "ghibli";
+  const onTaskCreated = typeof opts.onTaskCreated === "function" ? opts.onTaskCreated : null;
 
   const fullB64 = await _readFileBase64(filePath);
   const filename = _basename(filePath) || "upload.jpg";
@@ -267,9 +339,30 @@ async function photoTranslateChunked(filePath, onProgress, options) {
     if (isLast) lastResult = r;
   }
 
-  // 如果是异步重绘任务 → 自动开始轮询
+  // 如果是异步重绘任务 → 给上层一次决定权（注册推送 / 切后台运行）
   if (lastResult && lastResult.async && lastResult.task_id) {
-    return _pollRedrawResult(lastResult.task_id, onProgress);
+    const taskId = lastResult.task_id;
+    let decision = "wait";
+    if (onTaskCreated) {
+      try {
+        const r = await onTaskCreated(taskId);
+        if (r === "background") decision = "background";
+      } catch (e) {
+        console.warn("[onTaskCreated] hook 抛错，按 wait 继续", e);
+      }
+    }
+    if (decision === "background") {
+      // 上层已选"后台跑，做完通过订阅消息推送"
+      // 直接返回任务元信息，不轮询
+      return {
+        ok: true,
+        async: true,
+        deferred: true,
+        task_id: taskId,
+        status: "pending",
+      };
+    }
+    return _pollRedrawResult(taskId, onProgress);
   }
   return lastResult;
 }
@@ -409,4 +502,6 @@ module.exports = {
   pingHealth,
   getPhotoQuota,
   claimShareBonus,
+  registerRedrawNotify,
+  pollRedrawOnce,
 };

@@ -2,9 +2,19 @@ const {
   photoTranslateChunked,
   getPhotoQuota,
   claimShareBonus,
+  registerRedrawNotify,
+  pollRedrawOnce,
 } = require("../../utils/api.js");
 const history = require("../../utils/history.js");
+const pending = require("../../utils/redraw_pending.js");
 const { toFriendly, withRetry, isFriendlyError } = require("../../utils/errors.js");
+
+// 订阅消息模板 ID。请到 mp.weixin.qq.com → 订阅消息 → 我的模板里申请，
+// 然后在小程序后台 / 这个常量里填入你的 tmplId。
+// 模板字段建议：thing1(标题) thing2(结果) time3(时间) thing4(备注)
+// 见 backend/wx_subscribe.py 顶部注释。
+// 如果留空，前端会跳过订阅授权步骤，回退到原来的"全程等待"流程。
+const REDRAW_NOTIFY_TMPL_ID = "";  // ← TODO: 填模板 ID 后启用推送
 
 const ART_STYLE_OPTIONS = [
   { key: "ghibli", label: "吉卜力", emoji: "🌿" },
@@ -119,6 +129,164 @@ Page({
   onShow() {
     this.setData({ historyList: this._buildHistory() });
     this._refreshQuota();
+    // 用户从订阅消息 / 后台回到小程序时，自动检查待领取的 AI 重绘任务
+    this._checkPendingRedraws();
+  },
+
+  onLoad(query) {
+    // 订阅消息推送进来会带 ?task_id=xxx，记一下，等 onShow 处理
+    if (query && query.task_id) {
+      this._notifiedTaskId = String(query.task_id);
+    }
+  },
+
+  /** 扫描本地待领取队列，逐个拉一次结果。
+   *  done   → 直接展示在页面上（覆盖当前预览）
+   *  error  → toast + 移除
+   *  其他   → 留着下次再拉
+   *  特殊：若推送带过来的 task_id 在队列里，优先它
+   */
+  async _checkPendingRedraws() {
+    let list = pending.listPending();
+    if (!list.length) return;
+
+    if (this._notifiedTaskId) {
+      const tid = this._notifiedTaskId;
+      this._notifiedTaskId = "";
+      list = [
+        ...list.filter((x) => x.task_id === tid),
+        ...list.filter((x) => x.task_id !== tid),
+      ];
+    }
+
+    for (const item of list) {
+      try {
+        const r = await pollRedrawOnce(item.task_id);
+        if (!r) continue;
+
+        if (r.status === "done") {
+          pending.remove(item.task_id);
+          await this._renderRedrawResult(r, item);
+          // 一次只展示一个，避免多个完成时刷得太快
+          return;
+        }
+        if (r.status === "error") {
+          pending.remove(item.task_id);
+          wx.showToast({
+            title: `${item.style_label || "AI 重绘"} 任务失败`,
+            icon: "none",
+            duration: 2200,
+          });
+          continue;
+        }
+        // pending / running，继续等
+      } catch (e) {
+        console.warn("[pending] 拉取失败", item.task_id, e);
+      }
+    }
+  },
+
+  /** 把后端结果渲染到当前页面（与同步流程的展示逻辑保持一致）。 */
+  async _renderRedrawResult(r, item) {
+    const a = (r && r.analysis) || {};
+    const posterB64 = (r && r.poster_image_base64) || "";
+    this._posterBase64 = posterB64;
+
+    let posterPath = "";
+    if (posterB64) {
+      posterPath = await new Promise((resolve) => {
+        const fs = wx.getFileSystemManager();
+        const p = `${wx.env.USER_DATA_PATH}/poster_view_${Date.now()}.png`;
+        fs.writeFile({
+          filePath: p,
+          data: posterB64,
+          encoding: "base64",
+          success: () => resolve(p),
+          fail: () => resolve(""),
+        });
+      });
+    }
+
+    const next = {
+      loading: false,
+      errorMsg: "",
+      quote: a.quote || "",
+      persona: a.persona || "",
+      vibe: a.vibe || "",
+      vibeLabel: a.vibe_label || "",
+      palette: a.palette || [],
+      pets: a.pets || [],
+      posterImageSrc: posterPath || this.data.previewPath || "",
+    };
+    if (typeof r.redraw_remaining === "number") next.redrawRemaining = r.redraw_remaining;
+    if (typeof r.redraw_limit === "number") next.redrawLimit = r.redraw_limit;
+    this.setData(next);
+
+    history.add("photo", {
+      time: Date.now(),
+      previewPath: this.data.previewPath,
+      fileName: this.data.fileName || `${item.style_label || "AI 重绘"}.png`,
+      quote: next.quote,
+      persona: next.persona,
+      vibe: next.vibe,
+      vibeLabel: next.vibeLabel,
+      palette: next.palette,
+      pets: next.pets,
+      posterImageSrc: posterPath,
+    });
+
+    wx.showToast({
+      title: `${item.style_label || "AI 重绘"} 海报已生成`,
+      icon: "success",
+      duration: 2200,
+    });
+  },
+
+  /** 弹"是否后台运行"决策框。返回 'wait' / 'background'。
+   *  默认按钮 = 继续等待（用户多数还在页面上等）。
+   */
+  _askDeferOrWait(estimatedSec) {
+    const sec = estimatedSec || 30;
+    return new Promise((resolve) => {
+      wx.hideLoading();
+      wx.showModal({
+        title: "AI 已开始绘制 🎨",
+        content: `预计还要 ${sec} 秒左右。\n您可以继续等，也可以先去逛别的，做完会通过微信通知您。`,
+        confirmText: "继续等待",
+        cancelText: "稍后通知我",
+        confirmColor: "#FF6B6B",
+        success(r) {
+          resolve(r.confirm ? "wait" : "background");
+        },
+        fail() {
+          resolve("wait");
+        },
+      });
+    });
+  },
+
+  /** 触发订阅消息授权。返回 true=用户接受，false=拒绝/未配置/失败。
+   *  必须在用户点击事件回调内同步调用 wx.requestSubscribeMessage。
+   */
+  _requestSubscribePush() {
+    return new Promise((resolve) => {
+      const tplId = REDRAW_NOTIFY_TMPL_ID;
+      if (!tplId) {
+        // 没配模板 ID → 直接 false，回退到全程等待流程
+        resolve(false);
+        return;
+      }
+      wx.requestSubscribeMessage({
+        tmplIds: [tplId],
+        success(res) {
+          const ok = res && res[tplId] === "accept";
+          resolve(!!ok);
+        },
+        fail() {
+          resolve(false);
+        },
+      });
+    });
   },
 
   _refreshQuota() {
@@ -376,6 +544,19 @@ Page({
       return;
     }
 
+    const isRedraw = this.data.mode === "redraw";
+    const artStyle = this.data.artStyle;
+    const styleOption =
+      (this.data.artStyleOptions || []).find((s) => s.key === artStyle) || {};
+    const styleLabel = styleOption.label || "AI 风格";
+
+    // ---- AI 重绘模式：必须在"用户点击事件"的同步上下文里请求订阅授权 ----
+    // 如果模板 ID 没配置，_requestSubscribePush 直接返回 false，回退到全程等待。
+    let subscribeAccepted = false;
+    if (isRedraw) {
+      subscribeAccepted = await this._requestSubscribePush();
+    }
+
     this.setData({
       loading: true,
       errorMsg: "",
@@ -396,20 +577,56 @@ Page({
 
     try {
       const ext = (this.data.fileName || "").split(".").pop().toLowerCase();
-      const isRedraw = this.data.mode === "redraw";
       // 不限制用户上传图片；这里只在微信请求体过大时做透明压缩安全网。
       // AI 重绘提速在后端完成（缩到 640 长边 + 8 步），不靠限制用户原图。
       const finalPath = await ensureUnderLimit(path, ext);
       const finalSize = await _statSize(finalPath);
       console.log("[upload size]", finalSize, "bytes");
-      const apiOpts = { redraw: isRedraw, artStyle: this.data.artStyle };
+
+      const apiOpts = {
+        redraw: isRedraw,
+        artStyle,
+        // 异步任务被创建时回调：注册推送 + 询问是否后台跑
+        onTaskCreated: async (taskId) => {
+          // 1. 用户同意了订阅 → 把 task_id 绑定到 openid 上，做完会推送
+          if (subscribeAccepted) {
+            try {
+              await registerRedrawNotify(taskId);
+            } catch (e) {
+              console.warn("[subscribe] notify_consent 注册失败", e);
+            }
+          }
+          // 2. 弹"是否后台跑"决策框
+          const decision = await this._askDeferOrWait(30);
+          if (decision === "background") {
+            // 把任务存本地，下次 onShow 自动拉
+            pending.add({
+              task_id: taskId,
+              art_style: artStyle,
+              style_label: styleLabel,
+              created_at: Date.now(),
+            });
+            wx.showToast({
+              title: subscribeAccepted
+                ? "AI 在后台绘制，做完微信通知您"
+                : "AI 在后台绘制，下次回来自动展示",
+              icon: "none",
+              duration: 2400,
+            });
+          } else {
+            // 选了"继续等待"，重新挂上 loading 让轮询有 UI
+            wx.showLoading({ title: "AI 调色中 0s", mask: true });
+          }
+          return decision;
+        },
+      };
+
       const r = await withRetry(() =>
         photoTranslateChunked(
           finalPath,
           (p) => {
             let title;
             if (p && p.phase === "redraw") {
-              // 趣味文案 + 倒计时，让等待不那么煎熬
               const tipIdx = Math.floor(p.elapsed / 3) % REDRAW_WAITING_TIPS.length;
               title = `${REDRAW_WAITING_TIPS[tipIdx]} ${p.elapsed}s`;
             } else if (p && typeof p.done === "number") {
@@ -430,6 +647,13 @@ Page({
         )
       );
       clearTimeout(coldHintTimer);
+
+      // 用户选了"稍后通知我" → 任务在后台跑，本次直接结束
+      if (r && r.deferred) {
+        wx.hideLoading();
+        this.setData({ loading: false });
+        return;
+      }
 
       const a = (r && r.analysis) || {};
       const posterB64 = (r && r.poster_image_base64) || "";

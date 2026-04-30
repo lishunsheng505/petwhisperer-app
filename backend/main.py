@@ -27,6 +27,7 @@ from core import (
     run_voice_job,
 )
 from wx_security import ContentUnsafeError, check_image_safe, check_text_safe
+from wx_subscribe import build_redraw_done_data, send_subscribe_message
 
 logger = logging.getLogger("petwhisperer")
 logging.basicConfig(level=logging.INFO)
@@ -132,7 +133,9 @@ def _run_redraw_task(
     art_style: str,
     openid: str,
 ) -> None:
-    """后台 thread 跑 run_photo_job(redraw=True)，结果写回 _REDRAW_TASKS。"""
+    """后台 thread 跑 run_photo_job(redraw=True)，结果写回 _REDRAW_TASKS。
+    完成后若 task['notify_consent'] 为 True，则通过订阅消息推送给用户。
+    """
     task = _REDRAW_TASKS.get(task_id)
     if task is None:
         return
@@ -160,6 +163,31 @@ def _run_redraw_task(
         task["error"] = str(e)
     finally:
         task["finished_at"] = time.time()
+        # 任务结束后触发订阅消息推送（仅"做完"才推）。
+        # 失败任务不推，避免浪费用户的一次订阅授权。
+        if task.get("status") == "done" and task.get("notify_consent") and openid:
+            try:
+                style_label = ART_STYLES.get(art_style, {}).get("label", "AI 风格")
+                # 从 analysis 里抓宠物昵称（后备 "毛孩子"）
+                analysis = (task.get("result") or {}).get("analysis") or {}
+                pets = analysis.get("pets") or []
+                pet_name = "毛孩子"
+                if pets:
+                    first = pets[0]
+                    pet_name = (first.get("name") or first.get("species")
+                                or pet_name)
+                send_subscribe_message(
+                    openid,
+                    page=f"pages/photo/photo?task_id={task_id}",
+                    data=build_redraw_done_data(
+                        pet_name=pet_name,
+                        style_label=style_label,
+                        finished_at=task["finished_at"],
+                    ),
+                )
+            except Exception:
+                # 推送失败绝不能影响任务结果
+                logger.exception("[redraw_task %s] subscribe push failed", task_id)
 
 
 def _parse_photo_options(body_or_form: Any) -> tuple[bool, str]:
@@ -622,6 +650,72 @@ async def redraw_result(request: Request) -> JSONResponse:
         out["error"] = task.get("error", "AI 重绘失败")
 
     return JSONResponse(out)
+
+
+@app.post("/photo/redraw/notify_consent")
+async def redraw_notify_consent(request: Request) -> JSONResponse:
+    """前端 wx.requestSubscribeMessage 用户同意后调用本接口，
+    标记"任务做完时给我推一条订阅消息"。
+
+    入参 JSON: { "task_id": "rd_xxxxx" }
+    必须由微信小程序通过云托管发起（X-WX-OPENID 自动注入），
+    且这个 openid 必须就是当初创建 task 的人，否则拒绝。
+
+    返回: { ok: true, task_id, notify: true }
+    """
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"无法解析 JSON: {e}") from e
+
+    task_id = (body.get("task_id") or "").strip()
+    if not task_id:
+        raise HTTPException(status_code=400, detail="缺少 task_id")
+
+    task = _REDRAW_TASKS.get(task_id)
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="任务不存在或已过期，请重新发起 AI 重绘",
+        )
+
+    openid = _wx_openid(request)
+    # 校验 openid 一致：防止别人拿到你的 task_id 给自己注册推送
+    if not openid or openid != (task.get("openid") or ""):
+        raise HTTPException(status_code=403, detail="无权操作该任务")
+
+    task["notify_consent"] = True
+    logger.info(
+        "[REDRAW] notify_consent registered task_id=%s openid=%s",
+        task_id, openid[:8] + "***",
+    )
+
+    # 兼容"任务已经完成才注册"的边界：直接补推一次
+    if task.get("status") == "done":
+        try:
+            style_label = ART_STYLES.get(
+                task.get("art_style", ""), {}
+            ).get("label", "AI 风格")
+            analysis = (task.get("result") or {}).get("analysis") or {}
+            pets = analysis.get("pets") or []
+            pet_name = "毛孩子"
+            if pets:
+                first = pets[0]
+                pet_name = (first.get("name") or first.get("species")
+                            or pet_name)
+            send_subscribe_message(
+                openid,
+                page=f"pages/photo/photo?task_id={task_id}",
+                data=build_redraw_done_data(
+                    pet_name=pet_name,
+                    style_label=style_label,
+                    finished_at=task.get("finished_at", time.time()),
+                ),
+            )
+        except Exception:
+            logger.exception("[REDRAW] late-consent push failed task_id=%s", task_id)
+
+    return JSONResponse({"ok": True, "task_id": task_id, "notify": True})
 
 
 # ============================================================
