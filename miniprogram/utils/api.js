@@ -234,9 +234,9 @@ async function photoTranslateChunked(filePath, onProgress, options) {
 
   const fullB64 = await _readFileBase64(filePath);
   const filename = _basename(filePath) || "upload.jpg";
-  // callContainer 单次请求体限制约 1MB。200KB 可把请求次数降到原来的 1/4，
-  // 同时保留足够余量，上传阶段更快。
-  const CHUNK = 200 * 1024;
+  // 保持小分片，避免 wx.cloud.callContainer 单次请求体触发“上传内容过大”。
+  // 不限制用户选图大小，大图通过多片上传给后端处理。
+  const CHUNK = 50 * 1024;
   const total = Math.max(1, Math.ceil(fullB64.length / CHUNK));
   const sessionId = `s_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 

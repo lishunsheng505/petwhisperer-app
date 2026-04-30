@@ -70,20 +70,19 @@ function _compressOnce(src, quality) {
   });
 }
 
-async function ensureUnderLimit(src, ext, maxBytes) {
+async function ensureUnderLimit(src, ext) {
   const e = (ext || "").toLowerCase();
   if (COMPRESSIBLE.indexOf(e) < 0) return src;
-  const limit = maxBytes || MAX_UPLOAD_BYTES;
   let cur = src;
   let size = await _statSize(cur);
-  if (!size || size <= limit) return cur;
+  if (!size || size <= MAX_UPLOAD_BYTES) return cur;
   for (const q of [80, 60, 40, 25, 15]) {
     try {
       const next = await _compressOnce(cur, q);
       const ns = await _statSize(next);
       cur = next;
       size = ns || size;
-      if (size <= limit) return cur;
+      if (size <= MAX_UPLOAD_BYTES) return cur;
     } catch (e) {
       break;
     }
@@ -397,12 +396,9 @@ Page({
     try {
       const ext = (this.data.fileName || "").split(".").pop().toLowerCase();
       const isRedraw = this.data.mode === "redraw";
-      // AI 重绘模式后端还会压到 640 长边，所以前端先控到 2MB，减少上传分片耗时。
-      const finalPath = await ensureUnderLimit(
-        path,
-        ext,
-        isRedraw ? 2 * 1024 * 1024 : MAX_UPLOAD_BYTES
-      );
+      // 不限制用户上传图片；这里只在微信请求体过大时做透明压缩安全网。
+      // AI 重绘提速在后端完成（缩到 640 长边 + 8 步），不靠限制用户原图。
+      const finalPath = await ensureUnderLimit(path, ext);
       const finalSize = await _statSize(finalPath);
       console.log("[upload size]", finalSize, "bytes");
       const apiOpts = { redraw: isRedraw, artStyle: this.data.artStyle };
