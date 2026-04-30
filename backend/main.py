@@ -126,6 +126,59 @@ def _gc_redraw_tasks() -> None:
         _REDRAW_TASKS.pop(tid, None)
 
 
+# ============================================================
+# 语音翻译异步任务队列（同 redraw 思路，规避 callContainer 15s 超时）
+# 猫/狗语翻译串行做 STT + LLM + TTS, 总耗时常 8-15s, 触发上限就 102002
+# ============================================================
+_VOICE_TASKS: dict[str, dict[str, Any]] = {}
+_VOICE_TASK_TTL = 1800
+
+
+def _gc_voice_tasks() -> None:
+    now = time.time()
+    expired = [
+        tid for tid, t in _VOICE_TASKS.items()
+        if now - t.get("created_at", 0) > _VOICE_TASK_TTL
+    ]
+    for tid in expired:
+        _VOICE_TASKS.pop(tid, None)
+
+
+def _run_voice_task(
+    task_id: str,
+    *,
+    pet: str,
+    mode: str,
+    lang_code: str,
+    voice_id: str,
+    text: str | None,
+    audio_bytes: bytes | None,
+    audio_filename: str | None,
+) -> None:
+    """后台 thread 跑 run_voice_job，结果写回 _VOICE_TASKS。"""
+    task = _VOICE_TASKS.get(task_id)
+    if task is None:
+        return
+    task["status"] = "running"
+    task["started_at"] = time.time()
+    try:
+        result = run_voice_job(
+            pet=pet, mode=mode, lang_code=lang_code, voice_id=voice_id,
+            text=text, audio_bytes=audio_bytes, audio_filename=audio_filename,
+        )
+        task["status"] = "done"
+        task["result"] = _voice_json_from_result(result)
+    except ValueError as e:
+        task["status"] = "error"
+        task["error"] = str(e)
+    except Exception as e:
+        logger.exception("[voice_task %s] failed", task_id)
+        task["status"] = "error"
+        task["error"] = str(e)
+    finally:
+        task["finished_at"] = time.time()
+
+
 def _run_redraw_task(
     task_id: str,
     image_bytes: bytes,
@@ -834,23 +887,82 @@ async def voice_chunk(request: Request) -> JSONResponse:
             raise HTTPException(status_code=400, detail=e.message) from e
 
     voice_id = resolve_voice(lang, voice_gender)
+
+    # === 改异步：voice_chunk 最后一片必须立即返回, 不能等 STT+LLM+TTS ===
+    # callContainer 客户端硬超时 15s, 串行做 STT/LLM/TTS 经常 8-17s,
+    # 直接同步死路一条. 所以收齐分片后立刻起后台 task, 前端轮询 /voice/result.
+    _gc_voice_tasks()
+    task_id = "vc_" + uuid.uuid4().hex[:16]
+    _VOICE_TASKS[task_id] = {
+        "status": "pending",
+        "created_at": time.time(),
+        "pet": pet,
+        "mode": mode,
+    }
+    t = threading.Thread(
+        target=_run_voice_task,
+        args=(task_id,),
+        kwargs=dict(
+            pet=pet, mode=mode, lang_code=lang, voice_id=voice_id,
+            text=text, audio_bytes=full, audio_filename=filename,
+        ),
+        daemon=True,
+    )
+    t.start()
+    logger.info(
+        "[VOICE] task created task_id=%s pet=%s mode=%s",
+        task_id, pet, mode,
+    )
+    return JSONResponse({
+        "ok": True,
+        "done": False,
+        "async": True,
+        "task_id": task_id,
+        "status": "pending",
+        "estimated_seconds": 12,
+    })
+
+
+@app.post("/voice/result")
+async def voice_result(request: Request) -> JSONResponse:
+    """轮询语音翻译异步任务结果（前端每 1-2s 调一次直到 done/error）。
+
+    入参 JSON: { "task_id": "vc_xxxxx" }
+    返回：{
+        ok, task_id, status: "pending|running|done|error",
+        # status=done 时带上 _voice_json_from_result 全套字段
+        # status=error 时带 error
+    }
+    """
     try:
-        result = run_voice_job(
-            pet=pet,
-            mode=mode,
-            lang_code=lang,
-            voice_id=voice_id,
-            text=text,
-            audio_bytes=full,
-            audio_filename=filename,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        body = await request.json()
     except Exception as e:
-        logger.exception("voice_chunk job failed pet=%s", pet)
-        msg = traceback.format_exc() if os.getenv("DEBUG") == "1" else str(e)
-        raise HTTPException(status_code=500, detail=msg) from e
-    return JSONResponse(_voice_json_from_result(result))
+        raise HTTPException(status_code=400, detail=f"无法解析 JSON: {e}") from e
+    task_id = (body.get("task_id") or "").strip()
+    if not task_id:
+        raise HTTPException(status_code=400, detail="缺少 task_id")
+
+    task = _VOICE_TASKS.get(task_id)
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="语音任务不存在或已过期（30 分钟），请重新发起",
+        )
+
+    out: dict[str, Any] = {
+        "ok": True,
+        "task_id": task_id,
+        "status": task["status"],
+    }
+    elapsed = time.time() - task.get("started_at", task.get("created_at", time.time()))
+    out["elapsed_seconds"] = round(elapsed, 1)
+
+    if task["status"] == "done":
+        out.update(task.get("result") or {})
+    elif task["status"] == "error":
+        out["error"] = task.get("error", "翻译失败")
+
+    return JSONResponse(out)
 
 
 # ============================================================
@@ -980,20 +1092,36 @@ async def _voice_endpoint(pet: str, request: Request) -> JSONResponse:
             raise HTTPException(status_code=400, detail=e.message) from e
 
     voice_id = resolve_voice(lang, voice_gender)
-    try:
-        result = run_voice_job(
-            pet=pet,
-            mode=mode,
-            lang_code=lang,
-            voice_id=voice_id,
-            text=text,
-            audio_bytes=audio_bytes,
-            audio_filename=audio_name,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        logger.exception("voice_translate failed pet=%s", pet)
-        msg = traceback.format_exc() if os.getenv("DEBUG") == "1" else str(e)
-        raise HTTPException(status_code=500, detail=msg) from e
-    return JSONResponse(_voice_json_from_result(result))
+
+    # === 同样改异步：/cat /dog 文本翻译 LLM + TTS 串行也常 8-15s ===
+    # 立即返回 task_id, 前端轮询 /voice/result, 与 voice/chunk 共享后端任务表
+    _gc_voice_tasks()
+    task_id = "vc_" + uuid.uuid4().hex[:16]
+    _VOICE_TASKS[task_id] = {
+        "status": "pending",
+        "created_at": time.time(),
+        "pet": pet,
+        "mode": mode,
+    }
+    t = threading.Thread(
+        target=_run_voice_task,
+        args=(task_id,),
+        kwargs=dict(
+            pet=pet, mode=mode, lang_code=lang, voice_id=voice_id,
+            text=text, audio_bytes=audio_bytes, audio_filename=audio_name,
+        ),
+        daemon=True,
+    )
+    t.start()
+    logger.info(
+        "[VOICE] task created task_id=%s pet=%s mode=%s",
+        task_id, pet, mode,
+    )
+    return JSONResponse({
+        "ok": True,
+        "done": False,
+        "async": True,
+        "task_id": task_id,
+        "status": "pending",
+        "estimated_seconds": 12,
+    })

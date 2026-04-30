@@ -351,12 +351,19 @@ function createVoicePage(pet) {
               voiceGender: this.data.voiceGender,
               audioPath,
             },
-            ({ done, total }) => {
-              const pct = Math.floor((done / total) * 100);
-              wx.showLoading({
-                title: pct < 100 ? `上传中 ${pct}%` : "解读中…",
-                mask: true,
-              });
+            (p) => {
+              if (p && p.phase === "voice") {
+                wx.showLoading({
+                  title: `AI 解读中 ${p.elapsed}s`,
+                  mask: true,
+                });
+              } else if (p && typeof p.done === "number") {
+                const pct = Math.floor((p.done / p.total) * 100);
+                wx.showLoading({
+                  title: pct < 100 ? `上传中 ${pct}%` : "AI 解读中",
+                  mask: true,
+                });
+              }
             }
           )
         );
@@ -446,12 +453,23 @@ function createVoicePage(pet) {
       }, 8000);
       try {
         const r = await withRetry(() =>
-          voiceTranslate(this.data.pet, {
-            mode: apiMode,
-            lang: this.data.lang,
-            voiceGender: this.data.voiceGender,
-            text,
-          })
+          voiceTranslate(
+            this.data.pet,
+            {
+              mode: apiMode,
+              lang: this.data.lang,
+              voiceGender: this.data.voiceGender,
+              text,
+            },
+            (p) => {
+              if (p && p.phase === "voice") {
+                wx.showLoading({
+                  title: `AI 翻译中 ${p.elapsed}s`,
+                  mask: true,
+                });
+              }
+            }
+          )
         );
         clearTimeout(coldHintTimer);
         wx.hideLoading();

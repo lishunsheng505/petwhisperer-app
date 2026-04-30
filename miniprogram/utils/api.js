@@ -236,6 +236,41 @@ function _sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** 轮询 /voice/result 异步任务结果（猫/狗语 LLM+TTS 跨 15s 必走异步）。 */
+async function _pollVoiceResult(taskId, onProgress) {
+  const POLL_INTERVAL = 1000;
+  const MAX_WAIT_MS = 60000;
+  const started = Date.now();
+
+  while (Date.now() - started < MAX_WAIT_MS) {
+    await _sleep(POLL_INTERVAL);
+    const elapsed = Math.round((Date.now() - started) / 1000);
+
+    if (typeof onProgress === "function") {
+      try {
+        onProgress({ phase: "voice", elapsed, max: MAX_WAIT_MS / 1000 });
+      } catch (e) {}
+    }
+
+    let r;
+    try {
+      r = await _callContainer("/voice/result", {
+        data: { task_id: taskId },
+      });
+    } catch (e) {
+      console.warn("[voice/poll] 单次轮询失败，重试", e);
+      continue;
+    }
+
+    if (!r || typeof r !== "object") continue;
+    if (r.status === "done") return r;
+    if (r.status === "error") {
+      throw new Error(r.error || "翻译失败");
+    }
+  }
+  throw new Error(`翻译超时（${Math.round(MAX_WAIT_MS / 1000)}s 内未完成），请稍后再试`);
+}
+
 /** 轮询 AI 重绘异步任务结果。callContainer 客户端硬超时 15s，
  *  所以重绘必须走异步：start 立即返回 task_id，前端每 1s 轮询。
  *
@@ -369,7 +404,7 @@ async function photoTranslateChunked(filePath, onProgress, options) {
 
 // ========== /cat /dog ==========
 
-async function voiceTranslate(pet, opts) {
+async function voiceTranslate(pet, opts, onProgress) {
   const path = pet === "cat" ? "/cat" : "/dog";
   const { mode, lang, voiceGender, text, audioPath } = opts || {};
 
@@ -384,7 +419,12 @@ async function voiceTranslate(pet, opts) {
       data.audio_b64 = await _readFileBase64(audioPath);
       data.audio_filename = _basename(audioPath) || "audio.aac";
     }
-    return _callContainer(path, { data });
+    const r = await _callContainer(path, { data });
+    // 后端返回 async=true → 走轮询。新架构下 /cat /dog 都立即返回 task_id
+    if (r && r.async && r.task_id) {
+      return _pollVoiceResult(r.task_id, onProgress);
+    }
+    return r;
   }
 
   const url = `${API_BASE}${path}`;
@@ -488,6 +528,10 @@ async function voiceTranslateChunked(pet, opts, onProgress) {
       } catch (e) {}
     }
     if (isLast) lastResult = r;
+  }
+  // 最后一片返回 async=true → 后端起了异步任务, 前端轮询拉结果
+  if (lastResult && lastResult.async && lastResult.task_id) {
+    return _pollVoiceResult(lastResult.task_id, onProgress);
   }
   return lastResult;
 }
