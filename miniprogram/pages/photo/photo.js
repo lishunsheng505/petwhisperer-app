@@ -202,20 +202,38 @@ Page({
           data: posterB64,
           encoding: "base64",
           success: () => resolve(p),
-          fail: () => resolve(""),
+          fail: (e) => {
+            console.warn("[poster/async] writeFile 失败，使用 data URL", e);
+            resolve("");
+          },
         });
       });
+      if (!posterPath) {
+        posterPath = `data:image/png;base64,${posterB64}`;
+      }
     }
+
+    const petsRaw = Array.isArray(a.pets) ? a.pets : [];
+    const petsDisplay = petsRaw
+      .map((p) => {
+        if (!p) return "";
+        if (typeof p === "string") return p;
+        if (typeof p === "object") {
+          return p.individual_quote || p.type || "";
+        }
+        return String(p);
+      })
+      .filter(Boolean);
 
     const next = {
       loading: false,
       errorMsg: "",
-      quote: a.quote || "",
+      quote: a.quote_cn || a.quote || "",
       persona: a.persona || "",
       vibe: a.vibe || "",
-      vibeLabel: a.vibe_label || "",
+      vibeLabel: a.vibe_label_cn || a.vibe_label || "",
       palette: a.palette || [],
-      pets: a.pets || [],
+      pets: petsDisplay,
       posterImageSrc: posterPath || this.data.previewPath || "",
     };
     if (typeof r.redraw_remaining === "number") next.redrawRemaining = r.redraw_remaining;
@@ -678,6 +696,8 @@ Page({
         });
       }
 
+      // 海报图片来源：优先写本地文件（saveImageToPhotosAlbum 才能用文件路径），
+      // 写文件失败时 fallback 到 data URL（image 组件兼容，至少不会"图没了"）。
       let posterPath = "";
       if (posterB64) {
         posterPath = await new Promise((resolve) => {
@@ -688,10 +708,30 @@ Page({
             data: posterB64,
             encoding: "base64",
             success: () => resolve(p),
-            fail: () => resolve(""),
+            fail: (e) => {
+              console.warn("[poster] writeFile 失败，使用 data URL", e);
+              resolve("");
+            },
           });
         });
+        if (!posterPath) {
+          posterPath = `data:image/png;base64,${posterB64}`;
+        }
       }
+
+      // pets 字段是对象数组（后端返回 {type, head_x, head_y, individual_quote}），
+      // 渲染前压平成可显示的字符串数组，避免 wxml {{item}} 出现 [object Object]
+      const petsRaw = Array.isArray(a.pets) ? a.pets : [];
+      const petsDisplay = petsRaw
+        .map((p) => {
+          if (!p) return "";
+          if (typeof p === "string") return p;
+          if (typeof p === "object") {
+            return p.individual_quote || p.type || "";
+          }
+          return String(p);
+        })
+        .filter(Boolean);
 
       wx.hideLoading();
       const next = Object.assign(
@@ -702,7 +742,7 @@ Page({
           vibe: a.vibe || "",
           vibeLabel: a.vibe_label_cn || "",
           palette: a.palette || [],
-          pets: a.pets || [],
+          pets: petsDisplay,
           posterImageSrc: posterPath,
         },
         quotaPatch
